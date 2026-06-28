@@ -45,7 +45,7 @@
 #define FP_TIMEOUT_MS   10000
 #define UID_LEN         4
 #define PWD_LEN         4
-#define CONFIG_POLL_MS  3000
+#define CONFIG_POLL_MS  10000
 
 byte AUTH_CARD[UID_LEN] = {0x0C, 0xD5, 0xD4, 0xE7};
 char AUTH_PWD[PWD_LEN + 1] = "1234";
@@ -59,6 +59,7 @@ int rfidCount = 0;
 int fpList[MAX_FP];
 int fpCount = 0;
 bool remoteUnlockPending = false;
+bool configSyncFailed = false;
 
 // ==================== 经典蓝牙 SPP ====================
 BluetoothSerial SerialBT;
@@ -761,10 +762,12 @@ void pollConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   WiFiClient client;
-  client.setTimeout(300);
+  client.setTimeout(200);
   if (!client.connect(SERVER_HOST, SERVER_PORT)) {
+    configSyncFailed = true;
     return;
   }
+  configSyncFailed = false;
 
   String req = "GET /api/config HTTP/1.1\r\nHost: " + String(SERVER_HOST) + "\r\nConnection: close\r\n\r\n";
   client.print(req);
@@ -950,6 +953,9 @@ void loop() {
   if (sysState == STATE_IDLE && millis() - lastConfigPoll >= CONFIG_POLL_MS) {
     lastConfigPoll = millis();
     pollConfig();
+    if (configSyncFailed) {
+      lastConfigPoll += CONFIG_POLL_MS * 4;
+    }
   }
 
   if (sysState == STATE_UNLOCKED) {
