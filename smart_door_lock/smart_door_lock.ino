@@ -13,15 +13,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include "BluetoothSerial.h"
 
 // ==================== WiFi ====================
 #define WIFI_SSID     "ky"
 #define WIFI_PASS     "1472583692"
-#define SERVER_HOST   "10.132.190.95"
+#define SERVER_HOST   "10.65.10.223"
 #define SERVER_PORT   8000
 #define NTP_SERVER    "ntp.aliyun.com"
 #define GMT_OFFSET    28800
@@ -63,12 +60,8 @@ int fpList[MAX_FP];
 int fpCount = 0;
 bool remoteUnlockPending = false;
 
-// ==================== BLE 蓝牙 ====================
-#define SERVICE_UUID        "12340000-1234-1234-1234-123456789abc"
-#define CHARACTERISTIC_UUID "12340001-1234-1234-1234-123456789abc"
-BLEServer *pServer = NULL;
-BLECharacteristic *pCharacteristic = NULL;
-bool bleConnected = false;
+// ==================== 经典蓝牙 SPP ====================
+BluetoothSerial SerialBT;
 
 // ==================== OLED (U8g2) ====================
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, PIN_SCL, PIN_SDA);
@@ -121,40 +114,29 @@ uint8_t fpBufLen = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastOledRefresh = 0;
 
-// ==================== BLE 回调 ====================
+// ==================== 蓝牙回调/处理 ====================
 
 void onAccessGranted(const char* method);
 void onAccessDenied(const char* method);
 
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer) {
-    bleConnected = true;
-    Serial.println("[BLE] 设备已连接");
-  }
-  void onDisconnect(BLEServer* server) {
-    bleConnected = false;
-    Serial.println("[BLE] 设备已断开");
-    BLEDevice::startAdvertising();
-  }
-};
+void handleBluetoothApp() {
+  if (!SerialBT.available()) return;
 
-class CharCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) {
-    String value = pChar->getValue().c_str();
-    Serial.printf("[BLE] 收到密码: %s\n", value.c_str());
-    if (value == AUTH_PWD) {
-      pChar->setValue("OK");
-      pChar->notify();
-      Serial.println("[BLE] 密码正确 开锁!");
-      onAccessGranted("蓝牙");
-    } else {
-      pChar->setValue("FAIL");
-      pChar->notify();
-      Serial.println("[BLE] 密码错误");
-      onAccessDenied("蓝牙");
-    }
+  String value = SerialBT.readString();
+  value.trim();
+  if (value.length() == 0) return;
+
+  Serial.printf("[BT] 收到密码: %s\n", value.c_str());
+  if (value == AUTH_PWD) {
+    SerialBT.println("OK");
+    Serial.println("[BT] 密码正确 开锁!");
+    onAccessGranted("蓝牙");
+  } else {
+    SerialBT.println("FAIL");
+    Serial.println("[BT] 密码错误");
+    onAccessDenied("蓝牙");
   }
-};
+}
 
 // ==================== 工具 ====================
 
@@ -777,102 +759,121 @@ String getTimeString() {
 
 void pollConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
-  HTTPClient http;
-  String url = "http://" + String(SERVER_HOST) + ":" + String(SERVER_PORT) + "/api/config";
-  http.begin(url);
-  http.setTimeout(3000);
-  int code = http.GET();
-  if (code == 200) {
-    String payload = http.getString();
 
-    int vIdx = payload.indexOf("\"version\":");
-    if (vIdx > 0) {
-      int vStart = vIdx + 11;
-      while (payload[vStart] == ' ') vStart++;
-      int vEnd = payload.indexOf(",", vStart);
-      if (vEnd < 0) vEnd = payload.indexOf("}", vStart);
-      if (vEnd > vStart) {
-        int newVer = payload.substring(vStart, vEnd).toInt();
-        if (newVer > configVersion) {
-          configVersion = newVer;
+  WiFiClient client;
+  client.setTimeout(300);
+  if (!client.connect(SERVER_HOST, SERVER_PORT)) {
+    return;
+  }
 
-          int pIdx = payload.indexOf("\"door_password\":");
-          if (pIdx > 0) {
-            int pStart = payload.indexOf("\"", pIdx + 16) + 1;
-            int pEnd = payload.indexOf("\"", pStart);
-            if (pEnd > pStart) {
-              String newPwd = payload.substring(pStart, pEnd);
-              newPwd.toCharArray(AUTH_PWD, PWD_LEN + 1);
-            }
-          }
+  String req = "GET /api/config HTTP/1.1\r\nHost: " + String(SERVER_HOST) + "\r\nConnection: close\r\n\r\n";
+  client.print(req);
 
-          rfidCount = 0;
-          int rIdx = payload.indexOf("\"rfid_whitelist\"");
-          if (rIdx > 0) {
-            int arrStart = payload.indexOf("[", rIdx);
-            int arrEnd = payload.indexOf("]", arrStart);
-            if (arrEnd > arrStart) {
-              String arr = payload.substring(arrStart + 1, arrEnd);
-              int pos = 0;
-              while (pos < arr.length() && rfidCount < MAX_RFID) {
-                int s = arr.indexOf("\"", pos);
-                if (s < 0) break;
-                int e = arr.indexOf("\"", s + 1);
-                if (e < 0) break;
-                String hex = arr.substring(s + 1, e);
-                for (int i = 0; i < UID_LEN; i++) {
-                  rfidList[rfidCount][i] = strtoul(hex.substring(i * 3, i * 3 + 2).c_str(), NULL, 16);
-                }
-                rfidCount++;
-                pos = e + 1;
-              }
-            }
-          }
-
-          fpCount = 0;
-          int fIdx = payload.indexOf("\"fp_whitelist\"");
-          if (fIdx > 0) {
-            int arrStart = payload.indexOf("[", fIdx);
-            int arrEnd = payload.indexOf("]", arrStart);
-            if (arrEnd > arrStart) {
-              String arr = payload.substring(arrStart + 1, arrEnd);
-              int pos = 0;
-              while (pos < arr.length() && fpCount < MAX_FP) {
-                while (pos < arr.length() && (arr[pos] == ' ' || arr[pos] == ',')) pos++;
-                int e = arr.indexOf(",", pos);
-                if (e < 0) e = arr.indexOf("]", pos);
-                if (e > pos) {
-                  fpList[fpCount] = arr.substring(pos, e).toInt();
-                  fpCount++;
-                }
-                pos = e + 1;
-              }
-            }
-          }
-
-          Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
-        }
-      }
+  unsigned long start = millis();
+  String payload = "";
+  while (millis() - start < 800) {
+    if (client.available()) {
+      payload = client.readString();
+      break;
     }
+    delay(1);
+  }
+  client.stop();
 
-    int uIdx = payload.indexOf("\"unlock_request\":");
-    if (uIdx > 0) {
-      int uStart = uIdx + 17;
-      while (payload[uStart] == ' ') uStart++;
-      if (payload[uStart] == '1' && !remoteUnlockPending) {
-        remoteUnlockPending = true;
-        Serial.println("[REMOTE] 远程开锁请求");
-        onAccessGranted("远程");
-        HTTPClient http2;
-        http2.begin("http://" + String(SERVER_HOST) + ":" + String(SERVER_PORT) + "/api/unlock/done");
-        http2.setTimeout(2000);
-        http2.GET();
-        http2.end();
-        remoteUnlockPending = false;
+  if (payload.length() == 0) return;
+
+  // 找到JSON body
+  int jsonStart = payload.indexOf("\r\n\r\n");
+  if (jsonStart < 0) return;
+  payload = payload.substring(jsonStart + 4);
+
+  int vIdx = payload.indexOf("\"version\":");
+  if (vIdx > 0) {
+    int vStart = vIdx + 11;
+    while (payload[vStart] == ' ') vStart++;
+    int vEnd = payload.indexOf(",", vStart);
+    if (vEnd < 0) vEnd = payload.indexOf("}", vStart);
+    if (vEnd > vStart) {
+      int newVer = payload.substring(vStart, vEnd).toInt();
+      if (newVer > configVersion) {
+        configVersion = newVer;
+
+        int pIdx = payload.indexOf("\"door_password\":");
+        if (pIdx > 0) {
+          int pStart = payload.indexOf("\"", pIdx + 16) + 1;
+          int pEnd = payload.indexOf("\"", pStart);
+          if (pEnd > pStart) {
+            payload.substring(pStart, pEnd).toCharArray(AUTH_PWD, PWD_LEN + 1);
+          }
+        }
+
+        rfidCount = 0;
+        int rIdx = payload.indexOf("\"rfid_whitelist\"");
+        if (rIdx > 0) {
+          int arrStart = payload.indexOf("[", rIdx);
+          int arrEnd = payload.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            String arr = payload.substring(arrStart + 1, arrEnd);
+            int pos = 0;
+            while (pos < arr.length() && rfidCount < MAX_RFID) {
+              int s = arr.indexOf("\"", pos);
+              if (s < 0) break;
+              int e = arr.indexOf("\"", s + 1);
+              if (e < 0) break;
+              String hex = arr.substring(s + 1, e);
+              for (int i = 0; i < UID_LEN; i++) {
+                rfidList[rfidCount][i] = strtoul(hex.substring(i * 3, i * 3 + 2).c_str(), NULL, 16);
+              }
+              rfidCount++;
+              pos = e + 1;
+            }
+          }
+        }
+
+        fpCount = 0;
+        int fIdx = payload.indexOf("\"fp_whitelist\"");
+        if (fIdx > 0) {
+          int arrStart = payload.indexOf("[", fIdx);
+          int arrEnd = payload.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            String arr = payload.substring(arrStart + 1, arrEnd);
+            int pos = 0;
+            while (pos < arr.length() && fpCount < MAX_FP) {
+              while (pos < arr.length() && (arr[pos] == ' ' || arr[pos] == ',')) pos++;
+              int e = arr.indexOf(",", pos);
+              if (e < 0) e = arr.indexOf("]", pos);
+              if (e > pos) {
+                fpList[fpCount] = arr.substring(pos, e).toInt();
+                fpCount++;
+              }
+              pos = e + 1;
+            }
+          }
+        }
+
+        Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
       }
     }
   }
-  http.end();
+
+  int uIdx = payload.indexOf("\"unlock_request\":");
+  if (uIdx > 0) {
+    int uStart = uIdx + 17;
+    while (payload[uStart] == ' ') uStart++;
+    if (payload[uStart] == '1' && !remoteUnlockPending) {
+      remoteUnlockPending = true;
+      Serial.println("[REMOTE] 远程开锁请求");
+      onAccessGranted("远程");
+      WiFiClient c2;
+      c2.setTimeout(300);
+      if (c2.connect(SERVER_HOST, SERVER_PORT)) {
+        c2.print("GET /api/unlock/done HTTP/1.1\r\nHost: " + String(SERVER_HOST) + "\r\nConnection: close\r\n\r\n");
+        delay(100);
+        c2.stop();
+      }
+      remoteUnlockPending = false;
+    }
+  }
 }
 
 void setup() {
@@ -893,23 +894,14 @@ void setup() {
   initFingerprint();
   initCam();
 
-  // BLE 蓝牙
-  Serial.print("  [..] BLE 蓝牙    ");
-  BLEDevice::init("Smart_Lock");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new ServerCallbacks());
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic = pService->createCharacteristic(
-    CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pCharacteristic->addDescriptor(new BLE2902());
-  pCharacteristic->setCallbacks(new CharCallbacks());
-  pService->start();
-  pServer->getAdvertising()->start();
-  Serial.println("OK");
+  // 经典蓝牙 SPP，匹配 MIT App Inventor 的 BluetoothClient
+  Serial.print("  [..] 经典蓝牙    ");
+  SerialBT.setTimeout(200);
+  if (SerialBT.begin("Smart_Lock")) {
+    Serial.println("OK");
+  } else {
+    Serial.println("FAIL");
+  }
 
   delay(500);
   oledShowMain();
@@ -931,6 +923,7 @@ void setup() {
 // ==================== 主循环 ====================
 
 void loop() {
+  handleBluetoothApp();
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.reconnect();
     delay(500);
@@ -972,3 +965,5 @@ void loop() {
 
   delay(10);
 }
+
+
