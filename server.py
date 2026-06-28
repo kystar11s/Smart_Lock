@@ -48,6 +48,13 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS blacklist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        value TEXT NOT NULL,
+        name TEXT DEFAULT '',
+        created_at INTEGER NOT NULL
+    )''')
     c.execute('INSERT OR IGNORE INTO device_status (id) VALUES (1)')
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('door_password', '1234')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('config_version', '1')")
@@ -100,6 +107,27 @@ def delete_whitelist(id_):
     conn.close()
     bump_config_version()
 
+def get_blacklist():
+    conn = get_db()
+    rows = conn.execute('SELECT id, type, value, name, created_at FROM blacklist ORDER BY created_at DESC').fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_blacklist(type_, value, name):
+    conn = get_db()
+    conn.execute('INSERT INTO blacklist (type, value, name, created_at) VALUES (?, ?, ?, ?)',
+                 (type_, value, name, int(time.time())))
+    conn.commit()
+    conn.close()
+    bump_config_version()
+
+def delete_blacklist(id_):
+    conn = get_db()
+    conn.execute('DELETE FROM blacklist WHERE id = ?', (id_,))
+    conn.commit()
+    conn.close()
+    bump_config_version()
+
 def update_device_status(lock_state):
     conn = get_db()
     conn.execute('UPDATE device_status SET lock_state = ?, last_update = ? WHERE id = 1',
@@ -142,12 +170,16 @@ def get_config_for_esp32():
     conn = get_db()
     rfid_rows = conn.execute("SELECT value FROM whitelist WHERE type='rfid'").fetchall()
     fp_rows = conn.execute("SELECT value FROM whitelist WHERE type='fp'").fetchall()
+    rfid_bl_rows = conn.execute("SELECT value FROM blacklist WHERE type='rfid'").fetchall()
+    fp_bl_rows = conn.execute("SELECT value FROM blacklist WHERE type='fp'").fetchall()
     conn.close()
     return {
         'version': int(version),
         'door_password': password,
         'rfid_whitelist': [r[0] for r in rfid_rows],
         'fp_whitelist': [r[0] for r in fp_rows],
+        'rfid_blacklist': [r[0] for r in rfid_bl_rows],
+        'fp_blacklist': [r[0] for r in fp_bl_rows],
         'unlock_request': int(get_setting('unlock_request') or '0')
     }
 
@@ -456,6 +488,8 @@ ADMIN_HTML = '''
         .r-fail { background: rgba(255,71,87,0.15); color: #ff4757; }
         .w-rfid { background: rgba(0,212,255,0.15); color: #00d4ff; }
         .w-fp { background: rgba(46,213,115,0.15); color: #2ed573; }
+        .b-rfid { background: rgba(255,71,87,0.15); color: #ff4757; }
+        .b-fp { background: rgba(255,165,2,0.15); color: #ffa502; }
         .size-col { color: #666; }
         .actions-col { text-align: right; }
 
@@ -589,6 +623,7 @@ ADMIN_HTML = '''
         <div class="tabs">
             <div class="tab active" onclick="switchTab('records')">验证记录</div>
             <div class="tab" onclick="switchTab('whitelist')">白名单管理</div>
+            <div class="tab" onclick="switchTab('blacklist')">黑名单管理</div>
             <div class="tab" onclick="switchTab('notify')">通知设置</div>
             <div class="tab" onclick="switchTab('settings')">密码设置</div>
         </div>
@@ -664,6 +699,49 @@ ADMIN_HTML = '''
                 </table>
             </div>
             <div class="empty" id="whitelistEmpty" style="display:none">暂无白名单</div>
+        </div>
+
+        <div id="tab-blacklist" style="display:none">
+            <div class="toolbar">
+                <div></div>
+                <button class="btn btn-danger" onclick="toggleAddBlacklistForm()">+ 添加黑名单</button>
+            </div>
+            <div class="add-form" id="addBlacklistForm">
+                <h3>添加黑名单</h3>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>类型</label>
+                        <select id="blAddType">
+                            <option value="rfid">RFID 卡号</option>
+                            <option value="fp">指纹 ID</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>卡号/ID</label>
+                        <input type="text" id="blAddValue" placeholder="如: 0C:D5:D4:E7" />
+                    </div>
+                    <div class="form-field">
+                        <label>备注名称</label>
+                        <input type="text" id="blAddName" placeholder="如: 丢失的卡" />
+                    </div>
+                    <button class="btn btn-danger" onclick="addBlacklist()">确认添加</button>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>类型</th>
+                            <th>卡号/ID</th>
+                            <th>备注名称</th>
+                            <th>添加时间</th>
+                            <th style="width:80px;text-align:right">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blacklistBody"></tbody>
+                </table>
+            </div>
+            <div class="empty" id="blacklistEmpty" style="display:none">暂无黑名单</div>
         </div>
 
         <div id="tab-notify" style="display:none">
@@ -853,10 +931,12 @@ ADMIN_HTML = '''
             event.target.classList.add('active');
             document.getElementById('tab-records').style.display = tab === 'records' ? 'block' : 'none';
             document.getElementById('tab-whitelist').style.display = tab === 'whitelist' ? 'block' : 'none';
+            document.getElementById('tab-blacklist').style.display = tab === 'blacklist' ? 'block' : 'none';
             document.getElementById('tab-notify').style.display = tab === 'notify' ? 'block' : 'none';
             document.getElementById('tab-settings').style.display = tab === 'settings' ? 'block' : 'none';
             if (tab === 'records') loadRecords();
             if (tab === 'whitelist') loadWhitelist();
+            if (tab === 'blacklist') loadBlacklist();
             if (tab === 'settings') loadSettings();
         }
 
@@ -934,6 +1014,54 @@ ADMIN_HTML = '''
             if (!confirm('确定删除该白名单？')) return;
             await fetch('/api/whitelist/' + id, {method: 'DELETE'});
             loadWhitelist();
+        }
+
+        async function loadBlacklist() {
+            const res = await fetch('/api/blacklist');
+            const data = await res.json();
+            const tbody = document.getElementById('blacklistBody');
+            const empty = document.getElementById('blacklistEmpty');
+            if (data.length === 0) {
+                tbody.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            tbody.innerHTML = data.map(b => `
+                <tr>
+                    <td><span class="badge ${b.type === 'rfid' ? 'b-rfid' : 'b-fp'}">${b.type === 'rfid' ? 'RFID' : '指纹'}</span></td>
+                    <td style="font-family:monospace">${b.value}</td>
+                    <td>${b.name || '-'}</td>
+                    <td class="time-col">${fmtTime(b.created_at)}</td>
+                    <td class="actions-col"><button class="btn btn-danger btn-sm" onclick="delBlacklist(${b.id})">删除</button></td>
+                </tr>
+            `).join('');
+        }
+
+        function toggleAddBlacklistForm() {
+            document.getElementById('addBlacklistForm').classList.toggle('active');
+        }
+
+        async function addBlacklist() {
+            const type = document.getElementById('blAddType').value;
+            const value = document.getElementById('blAddValue').value.trim();
+            const name = document.getElementById('blAddName').value.trim();
+            if (!value) { alert('请输入卡号/ID'); return; }
+            await fetch('/api/blacklist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({type, value, name})
+            });
+            document.getElementById('blAddValue').value = '';
+            document.getElementById('blAddName').value = '';
+            document.getElementById('addBlacklistForm').classList.remove('active');
+            loadBlacklist();
+        }
+
+        async function delBlacklist(id) {
+            if (!confirm('确定删除该黑名单？')) return;
+            await fetch('/api/blacklist/' + id, {method: 'DELETE'});
+            loadBlacklist();
         }
 
         async function refreshStatus() {
@@ -1243,6 +1371,33 @@ def api_del_whitelist(id):
     delete_whitelist(id)
     return jsonify({'success': True}), 200
 
+@app.route('/api/blacklist')
+@login_required
+def api_blacklist():
+    return jsonify(get_blacklist())
+
+@app.route('/api/blacklist', methods=['POST'])
+@login_required
+def api_add_blacklist():
+    data = request.json
+    add_blacklist(data['type'], data['value'], data.get('name', ''))
+    return jsonify({'success': True}), 200
+
+@app.route('/api/blacklist/<int:id>', methods=['DELETE'])
+@login_required
+def api_del_blacklist(id):
+    delete_blacklist(id)
+    return jsonify({'success': True}), 200
+
+@app.route('/api/alert', methods=['POST'])
+def api_alert():
+    data = request.json
+    if data and data.get('type') == 'brute_force':
+        count = data.get('count', '?')
+        send_notification('暴力破解告警', f'密码连续错误{count}次，系统已锁定30秒！请检查是否有人试图入侵。', 'fail')
+        print(f"[ALERT] 暴力破解告警: {count}次连续错误")
+    return jsonify({'success': True}), 200
+
 @app.route('/api/status')
 def api_status():
     return jsonify(get_device_status())
@@ -1323,7 +1478,7 @@ def api_export_csv():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("  智能门禁管理系统 v2.0")
+    print("  智能门禁管理系统 v2.1")
     print("=" * 50)
     print(f"  访问地址: http://127.0.0.1:8000")
     print(f"  管理登录: admin / 123456")

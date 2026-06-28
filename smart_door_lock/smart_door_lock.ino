@@ -1,7 +1,8 @@
 /*
- * 智能门锁 v8.0
+ * 智能门锁 v9.0
  * ESP32 + RFID + 指纹 + 矩阵键盘 + OLED + 舵机 + ESP32-CAM
  * U8g2 中文显示 + NTP时间 + 云端配置同步
+ * 暴力破解防护 + 黑名单管理 + OLED升级
  */
 
 #include <SPI.h>
@@ -60,6 +61,20 @@ int fpList[MAX_FP];
 int fpCount = 0;
 bool remoteUnlockPending = false;
 bool configSyncFailed = false;
+
+// ==================== 暴力破解防护 ====================
+int failCount = 0;
+unsigned long lockoutUntil = 0;
+#define FAIL_THRESHOLD 5
+#define LOCKOUT_MS    30000UL
+
+// ==================== 黑名单 ====================
+#define MAX_RFID_BL 10
+#define MAX_FP_BL   10
+byte rfidBlackList[MAX_RFID_BL][UID_LEN];
+int rfidBlackCount = 0;
+int fpBlackList[MAX_FP_BL];
+int fpBlackCount = 0;
 
 // ==================== 经典蓝牙 SPP ====================
 BluetoothSerial SerialBT;
@@ -128,13 +143,28 @@ void handleBluetoothApp() {
   if (value.length() == 0) return;
 
   Serial.printf("[BT] 收到密码: %s\n", value.c_str());
+
+  // 锁定中拒绝
+  if (millis() < lockoutUntil) {
+    SerialBT.println("LOCKED");
+    Serial.println("[BT] 已锁定 拒绝操作");
+    return;
+  }
+
   if (value == AUTH_PWD) {
     SerialBT.println("OK");
     Serial.println("[BT] 密码正确 开锁!");
+    failCount = 0;
     onAccessGranted("蓝牙");
   } else {
     SerialBT.println("FAIL");
     Serial.println("[BT] 密码错误");
+    failCount++;
+    if (failCount >= FAIL_THRESHOLD) {
+      lockoutUntil = millis() + LOCKOUT_MS;
+      Serial.println("[SECURITY] 蓝牙密码连续错误5次 已锁定30秒!");
+      sendBruteForceAlert();
+    }
     onAccessDenied("蓝牙");
   }
 }
@@ -181,33 +211,54 @@ void oledShowMain() {
   u8g2.drawFrame(0, 0, 128, 64);
 
   // 标题栏 (反色)
-  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.drawBox(0, 0, 128, 12);
   u8g2.setDrawColor(0);
-
-  // 标题 居中偏左
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-  u8g2.drawUTF8(20, 12, "智能门锁");
+  u8g2.drawUTF8(2, 10, "智能门锁");
 
-  // 时间 右对齐 (8字符 × 6px = 48px, 从x=80开始)
-  String timeStr = getTimeString();
-  u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(80, 12, timeStr.c_str());
+  // 右上角小锁图标
+  if (sysState == STATE_UNLOCKED) {
+    u8g2.drawRFrame(112, 1, 10, 8, 2);
+    u8g2.drawBox(114, 1, 6, 3);
+  } else {
+    u8g2.drawRBox(112, 1, 10, 8, 2);
+    u8g2.drawBox(114, 1, 6, 3);
+  }
   u8g2.setDrawColor(1);
 
-  // 锁图标
-  drawLockIcon(64, 28, true);
+  // 中央大字时间
+  String timeStr = getTimeString();
+  u8g2.setFont(u8g2_font_logisoso20_tf);
+  int tw = u8g2.getUTF8Width(timeStr.c_str());
+  u8g2.drawUTF8((128 - tw) / 2, 32, timeStr.c_str());
+
+  // 日期 (时间下方居中)
+  String dateStr = getDateString();
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  int dw = u8g2.getUTF8Width(dateStr.c_str());
+  u8g2.drawUTF8((128 - dw) / 2, 44, dateStr.c_str());
 
   // 分隔线
-  u8g2.drawHLine(0, 48, 128);
+  u8g2.drawHLine(0, 47, 128);
 
-  // 底部三列
-  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-  u8g2.drawUTF8(16, 62, "刷卡");
-  u8g2.drawUTF8(56, 62, "触摸");
-  u8g2.drawUTF8(96, 62, "按键");
+  // 锁定倒计时 or 底部状态
+  if (millis() < lockoutUntil) {
+    int remain = (lockoutUntil - millis()) / 1000 + 1;
+    char lockBuf[20];
+    sprintf(lockBuf, "已锁定 %ds", remain);
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    int lw = u8g2.getUTF8Width(lockBuf);
+    u8g2.drawUTF8((128 - lw) / 2, 57, lockBuf);
+  } else {
+    // 左下 WiFi/BLE 图标
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(2, 56, WiFi.status() == WL_CONNECTED ? "WiFi" : "---");
+    u8g2.drawStr(32, 56, "BT");
 
-  u8g2.drawVLine(42, 49, 15);
-  u8g2.drawVLine(86, 49, 15);
+    // 右下开锁方式提示
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2.drawUTF8(64, 57, "刷卡|指纹|密码");
+  }
 
   u8g2.sendBuffer();
 }
@@ -238,24 +289,65 @@ void oledShowPassword() {
       u8g2.print("_");
   }
 
-  u8g2.drawHLine(0, 26, 128);
+  // 失败次数提示
+  if (failCount > 0 && millis() >= lockoutUntil) {
+    int remain = FAIL_THRESHOLD - failCount;
+    char hint[24];
+    sprintf(hint, "注意: 还剩%d次", remain);
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    int hw = u8g2.getUTF8Width(hint);
+    u8g2.drawUTF8((128 - hw) / 2, 34, hint);
+  }
+
+  u8g2.drawHLine(0, 37, 128);
 
   // 键盘 (不超框)
-  int gy = 27;
+  int gy = 38;
   int cw = 31;
   int ch = 9;
 
-  for (int r = 0; r <= 4; r++)
+  for (int r = 0; r <= 3; r++)
     u8g2.drawHLine(1, gy + r * ch, 126);
   for (int c = 0; c <= 4; c++)
-    u8g2.drawVLine(1 + c * cw, gy, 36);
+    u8g2.drawVLine(1 + c * cw, gy, 27);
 
-  for (int r = 0; r < 4; r++) {
+  for (int r = 0; r < 3; r++) {
     for (int c = 0; c < 4; c++) {
       u8g2.setCursor(2 + c * cw + 8, gy + r * ch + 7);
       u8g2.print(keyLabels[r][c]);
     }
   }
+
+  u8g2.sendBuffer();
+}
+
+// ===== 锁定界面 =====
+void oledShowLockout() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+
+  // 标题
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(34, 12, "安全锁定");
+  u8g2.setDrawColor(1);
+
+  // 锁图标
+  drawLockIcon(64, 22, true);
+
+  // 倒计时
+  int remain = (lockoutUntil - millis()) / 1000 + 1;
+  if (remain < 0) remain = 0;
+  char buf[20];
+  sprintf(buf, "%d秒后解除", remain);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  int bw = u8g2.getUTF8Width(buf);
+  u8g2.drawUTF8((128 - bw) / 2, 52, buf);
+
+  // 提示
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.drawUTF8(16, 62, "密码连续错误已锁定");
 
   u8g2.sendBuffer();
 }
@@ -524,9 +616,16 @@ void checkPassword() {
   pwdBuf[PWD_LEN] = '\0';
   if (strcmp(pwdBuf, AUTH_PWD) == 0) {
     Serial.println("[密码] 验证通过");
+    failCount = 0;
     onAccessGranted("密码");
   } else {
-    Serial.println("[密码] 密码错误");
+    failCount++;
+    Serial.printf("[密码] 密码错误 (第%d次)\n", failCount);
+    if (failCount >= FAIL_THRESHOLD) {
+      lockoutUntil = millis() + LOCKOUT_MS;
+      Serial.println("[SECURITY] 密码连续错误5次 已锁定30秒!");
+      sendBruteForceAlert();
+    }
     onAccessDenied("密码");
   }
 }
@@ -535,6 +634,12 @@ void handleKeypad() {
   char key = keypad.getKey();
   if (!key) return;
   if (sysState == STATE_UNLOCKED) return;
+
+  // 锁定中检查
+  if (millis() < lockoutUntil) {
+    oledShowLockout();
+    return;
+  }
 
   if (!pwdInputMode) {
     pwdInputMode = true;
@@ -616,8 +721,12 @@ void pollRFID() {
   Serial.print("[RFID] 卡片: ");
   printHex(rfid.uid.uidByte, rfid.uid.size);
   Serial.println();
-  if (isAuthCard()) onAccessGranted("RFID");
-  else {
+  if (isBlacklistedRfid()) {
+    Serial.println("  [黑名单] 已拒绝!");
+    onAccessDenied("RFID");
+  } else if (isAuthCard()) {
+    onAccessGranted("RFID");
+  } else {
     Serial.println("  未知卡片");
     onAccessDenied("RFID");
   }
@@ -650,12 +759,17 @@ void fpPoll() {
       if (fpBufLen >= 9 + L) {
         uint8_t step = fpStep();
         uint8_t ack  = fpAck();
-        if (step == 0x05) {
+          if (step == 0x05) {
           fpState = FP_IDLE;
           if (ack == 0x00) {
             uint16_t id = (fpIdH() << 8) | fpIdL();
             Serial.printf("[指纹] 识别成功 ID=%d\n", id);
-            onAccessGranted("指纹");
+            if (isBlacklistedFp(id)) {
+              Serial.println("  [黑名单] 指纹已拒绝!");
+              onAccessDenied("指纹");
+            } else {
+              onAccessGranted("指纹");
+            }
           } else if (ack == 0x09) {
             Serial.println("[指纹] 识别错误 未匹配");
             onAccessDenied("指纹");
@@ -672,7 +786,7 @@ void fpPoll() {
 void showBanner() {
   Serial.println();
   Serial.println("  ╔══════════════════════════════╗");
-  Serial.println("  ║      智 能 门 锁 v8.0       ║");
+  Serial.println("  ║      智 能 门 锁 v9.0       ║");
   Serial.println("  ║  RFID+指纹+键盘+OLED+舵机   ║");
   Serial.println("  ╚══════════════════════════════╝");
   Serial.println();
@@ -754,6 +868,51 @@ String getTimeString() {
   char buf[9];
   sprintf(buf, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
   return String(buf);
+}
+
+String getDateString() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) return "--/--";
+  const char* weekDays[] = {"日", "一", "二", "三", "四", "五", "六"};
+  char buf[16];
+  sprintf(buf, "%02d-%02d 周%s", timeinfo.tm_mon + 1, timeinfo.tm_mday, weekDays[timeinfo.tm_wday]);
+  return String(buf);
+}
+
+// ==================== 暴力破解告警 ====================
+
+void sendBruteForceAlert() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClient client;
+  client.setTimeout(300);
+  if (!client.connect(SERVER_HOST, SERVER_PORT)) return;
+  String body = "{\"type\":\"brute_force\",\"count\":" + String(failCount) + "}";
+  String req = "POST /api/alert HTTP/1.1\r\nHost: " + String(SERVER_HOST) + "\r\nContent-Type: application/json\r\nContent-Length: " + String(body.length()) + "\r\nConnection: close\r\n\r\n" + body;
+  client.print(req);
+  delay(100);
+  client.stop();
+  Serial.println("[SECURITY] 暴力破解告警已发送");
+}
+
+// ==================== 黑名单检查 ====================
+
+bool isBlacklistedRfid() {
+  if (rfidBlackCount == 0) return false;
+  for (int c = 0; c < rfidBlackCount; c++) {
+    bool match = true;
+    for (byte i = 0; i < UID_LEN; i++) {
+      if (rfid.uid.uidByte[i] != rfidBlackList[c][i]) { match = false; break; }
+    }
+    if (match) return true;
+  }
+  return false;
+}
+
+bool isBlacklistedFp(uint16_t id) {
+  for (int i = 0; i < fpBlackCount; i++) {
+    if (fpBlackList[i] == id) return true;
+  }
+  return false;
 }
 
 // ==================== 配置同步 ====================
@@ -854,7 +1013,53 @@ void pollConfig() {
           }
         }
 
-        Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
+        // 黑名单解析
+        rfidBlackCount = 0;
+        int rbIdx = payload.indexOf("\"rfid_blacklist\"");
+        if (rbIdx > 0) {
+          int arrStart = payload.indexOf("[", rbIdx);
+          int arrEnd = payload.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            String arr = payload.substring(arrStart + 1, arrEnd);
+            int pos = 0;
+            while (pos < arr.length() && rfidBlackCount < MAX_RFID_BL) {
+              int s = arr.indexOf("\"", pos);
+              if (s < 0) break;
+              int e = arr.indexOf("\"", s + 1);
+              if (e < 0) break;
+              String hex = arr.substring(s + 1, e);
+              for (int i = 0; i < UID_LEN; i++) {
+                rfidBlackList[rfidBlackCount][i] = strtoul(hex.substring(i * 3, i * 3 + 2).c_str(), NULL, 16);
+              }
+              rfidBlackCount++;
+              pos = e + 1;
+            }
+          }
+        }
+
+        fpBlackCount = 0;
+        int fbIdx = payload.indexOf("\"fp_blacklist\"");
+        if (fbIdx > 0) {
+          int arrStart = payload.indexOf("[", fbIdx);
+          int arrEnd = payload.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            String arr = payload.substring(arrStart + 1, arrEnd);
+            int pos = 0;
+            while (pos < arr.length() && fpBlackCount < MAX_FP_BL) {
+              while (pos < arr.length() && (arr[pos] == ' ' || arr[pos] == ',')) pos++;
+              int e = arr.indexOf(",", pos);
+              if (e < 0) e = arr.indexOf("]", pos);
+              if (e > pos) {
+                fpBlackList[fpBlackCount] = arr.substring(pos, e).toInt();
+                fpBlackCount++;
+              }
+              pos = e + 1;
+            }
+          }
+        }
+
+        Serial.printf("[SYNC] v%d pwd=%s rfid=%d/%d fp=%d/%d bl_rfid=%d bl_fp=%d\n",
+          configVersion, AUTH_PWD, rfidCount, rfidBlackCount, fpCount, fpBlackCount, rfidBlackCount, fpBlackCount);
       }
     }
   }
@@ -940,6 +1145,8 @@ void loop() {
       if (!pwdInputMode) {
         yield();
         oledShowMain();
+      } else if (millis() < lockoutUntil) {
+        oledShowLockout();
       }
     }
   }
