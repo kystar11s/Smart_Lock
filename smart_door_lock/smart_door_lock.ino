@@ -13,6 +13,10 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 // ==================== WiFi ====================
 #define WIFI_SSID     "ky"
@@ -58,6 +62,13 @@ int rfidCount = 0;
 int fpList[MAX_FP];
 int fpCount = 0;
 bool remoteUnlockPending = false;
+
+// ==================== BLE 蓝牙 ====================
+#define SERVICE_UUID        "12340000-1234-1234-1234-123456789abc"
+#define CHARACTERISTIC_UUID "12340001-1234-1234-1234-123456789abc"
+BLEServer *pServer = NULL;
+BLECharacteristic *pCharacteristic = NULL;
+bool bleConnected = false;
 
 // ==================== OLED (U8g2) ====================
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, PIN_SCL, PIN_SDA);
@@ -109,6 +120,38 @@ uint8_t fpBuf[64];
 uint8_t fpBufLen = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastOledRefresh = 0;
+
+// ==================== BLE 回调 ====================
+
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    bleConnected = true;
+    Serial.println("[BLE] 设备已连接");
+  }
+  void onDisconnect(BLEServer* pServer) {
+    bleConnected = false;
+    Serial.println("[BLE] 设备已断开");
+    pServer->getAdvertising()->start();
+  }
+};
+
+class CharCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pChar) {
+    String value = pChar->getValue().c_str();
+    Serial.printf("[BLE] 收到密码: %s\n", value.c_str());
+    if (value == AUTH_PWD) {
+      pChar->setValue("OK");
+      pChar->notify();
+      Serial.println("[BLE] 密码正确 开锁!");
+      onAccessGranted("蓝牙");
+    } else {
+      pChar->setValue("FAIL");
+      pChar->notify();
+      Serial.println("[BLE] 密码错误");
+      onAccessDenied("蓝牙");
+    }
+  }
+};
 
 // ==================== 工具 ====================
 
@@ -847,6 +890,24 @@ void setup() {
   initFingerprint();
   initCam();
 
+  // BLE 蓝牙
+  Serial.print("  [..] BLE 蓝牙    ");
+  BLEDevice::init("Smart_Lock");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ |
+    BLECharacteristic::PROPERTY_WRITE |
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pCharacteristic->addDescriptor(new BLE2902());
+  pCharacteristic->setCallbacks(new CharCallbacks());
+  pService->start();
+  pServer->getAdvertising()->start();
+  Serial.println("OK");
+
   delay(500);
   oledShowMain();
   beep(1, 200);
@@ -857,6 +918,7 @@ void setup() {
   if (fpOnline)
     Serial.println("  │  [指纹]  放手指开锁          │");
   Serial.println("  │  [密码]  按任意键开始输入     │");
+  Serial.println("  │  [蓝牙]  手机App开锁         │");
   Serial.println("  │    * 删除  B 清空  # 确认    │");
   Serial.println("  │    D 返回主界面              │");
   Serial.println("  └─────────────────────────────┘");
