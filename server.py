@@ -1011,15 +1011,23 @@ ADMIN_HTML = '''
                 msg.textContent = '❌ 两次输入的密码不一致';
                 return;
             }
-            await fetch('/api/config', {
+            const res = await fetch('/api/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({door_password: newPwd})
             });
+            const data = await res.json();
             msg.style.display = 'block';
-            msg.style.background = 'rgba(46,213,115,0.1)';
-            msg.style.color = '#2ed573';
-            msg.textContent = '✅ 密码已保存，ESP32 将在下次同步时更新';
+            if (data.success) {
+                msg.style.background = 'rgba(46,213,115,0.1)';
+                msg.style.color = '#2ed573';
+                msg.textContent = '✅ 密码已保存，ESP32 将在下次同步时更新';
+                document.getElementById('currentPwd').value = newPwd;
+            } else {
+                msg.style.background = 'rgba(255,71,87,0.1)';
+                msg.style.color = '#ff4757';
+                msg.textContent = '❌ 保存失败: ' + (data.error || '未知错误');
+            }
             document.getElementById('newPwd').value = '';
             document.getElementById('confirmPwd').value = '';
             document.getElementById('pwdHint').textContent = '';

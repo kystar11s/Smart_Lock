@@ -805,8 +805,6 @@ void pollConfig() {
           }
 
           Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
-        } else {
-          Serial.printf("[SYNC] v%d 已是最新\n", configVersion);
         }
       }
     }
