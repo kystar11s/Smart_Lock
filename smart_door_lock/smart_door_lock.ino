@@ -18,7 +18,7 @@
 // ==================== WiFi ====================
 #define WIFI_SSID     "ky"
 #define WIFI_PASS     "1472583692"
-#define SERVER_HOST   "10.65.10.223"
+#define SERVER_HOST   "10.132.190.95"
 #define SERVER_PORT   8000
 #define NTP_SERVER    "ntp.aliyun.com"
 #define GMT_OFFSET    28800
@@ -786,7 +786,6 @@ void pollConfig() {
 
   if (payload.length() == 0) return;
 
-  // 找到JSON body
   int jsonStart = payload.indexOf("\r\n\r\n");
   if (jsonStart < 0) return;
   payload = payload.substring(jsonStart + 4);
@@ -856,6 +855,8 @@ void pollConfig() {
         }
 
         Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
+      } else {
+        Serial.printf("[SYNC] v%d已是最新\n", configVersion);
       }
     }
   }
@@ -927,7 +928,6 @@ void setup() {
 // ==================== 主循环 ====================
 
 void loop() {
-  handleBluetoothApp();
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.reconnect();
     delay(500);
@@ -970,6 +970,7 @@ void loop() {
     }
   }
 
+  handleBluetoothApp();
   delay(10);
 }
 
