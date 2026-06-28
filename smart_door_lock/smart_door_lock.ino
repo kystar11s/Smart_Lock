@@ -473,7 +473,7 @@ void camReportStatus(const char *status) {
 void onAccessGranted(const char *method) {
   if (sysState == STATE_UNLOCKED) return;
   Serial.printf("  >> %s 验证通过! 开锁!\n", method);
-  beep(1, 200);
+  beep(1, 100);
   digitalWrite(PIN_LED, HIGH);
   lockServo.write(ANGLE_UNLOCK);
   sysState = STATE_UNLOCKED;
@@ -855,8 +855,6 @@ void pollConfig() {
         }
 
         Serial.printf("[SYNC] v%d pwd=%s rfid=%d fp=%d\n", configVersion, AUTH_PWD, rfidCount, fpCount);
-      } else {
-        Serial.printf("[SYNC] v%d已是最新\n", configVersion);
       }
     }
   }
