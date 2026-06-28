@@ -216,13 +216,19 @@ void oledShowMain() {
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
   u8g2.drawUTF8(2, 10, "智能门锁");
 
-  // 右上角小锁图标
+  // 右上角: WiFi/BT状态 + 小锁图标
+  u8g2.setFont(u8g2_font_5x7_tf);
+  if (WiFi.status() == WL_CONNECTED)
+    u8g2.drawStr(78, 9, "WiFi");
+  else
+    u8g2.drawStr(78, 9, "---");
+  u8g2.drawStr(100, 9, "BT");
+
+  // 小锁图标
   if (sysState == STATE_UNLOCKED) {
-    u8g2.drawRFrame(112, 1, 10, 8, 2);
-    u8g2.drawBox(114, 1, 6, 3);
+    u8g2.drawRFrame(116, 2, 8, 7, 2);
   } else {
-    u8g2.drawRBox(112, 1, 10, 8, 2);
-    u8g2.drawBox(114, 1, 6, 3);
+    u8g2.drawRBox(116, 2, 8, 7, 2);
   }
   u8g2.setDrawColor(1);
 
@@ -241,7 +247,7 @@ void oledShowMain() {
   // 分隔线
   u8g2.drawHLine(0, 47, 128);
 
-  // 锁定倒计时 or 底部状态
+  // 锁定倒计时 or 底部三列
   if (millis() < lockoutUntil) {
     int remain = (lockoutUntil - millis()) / 1000 + 1;
     char lockBuf[20];
@@ -250,14 +256,13 @@ void oledShowMain() {
     int lw = u8g2.getUTF8Width(lockBuf);
     u8g2.drawUTF8((128 - lw) / 2, 57, lockBuf);
   } else {
-    // 左下 WiFi/BLE 图标
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(2, 56, WiFi.status() == WL_CONNECTED ? "WiFi" : "---");
-    u8g2.drawStr(32, 56, "BT");
-
-    // 右下开锁方式提示
     u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2.drawUTF8(64, 57, "刷卡|指纹|密码");
+    u8g2.drawUTF8(8, 57, "刷卡");
+    u8g2.drawUTF8(52, 57, "指纹");
+    u8g2.drawUTF8(96, 57, "密码");
+
+    u8g2.drawVLine(40, 48, 15);
+    u8g2.drawVLine(84, 48, 15);
   }
 
   u8g2.sendBuffer();
