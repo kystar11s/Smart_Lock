@@ -760,9 +760,10 @@ String getTimeString() {
 
 void pollConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
+  yield();
 
   WiFiClient client;
-  client.setTimeout(200);
+  client.setTimeout(500);
   if (!client.connect(SERVER_HOST, SERVER_PORT)) {
     configSyncFailed = true;
     return;
@@ -938,7 +939,10 @@ void loop() {
     pollRFID();
     if (millis() - lastOledRefresh >= 1000) {
       lastOledRefresh = millis();
-      if (!pwdInputMode) oledShowMain();
+      if (!pwdInputMode) {
+        yield();
+        oledShowMain();
+      }
     }
   }
 
@@ -953,9 +957,6 @@ void loop() {
   if (sysState == STATE_IDLE && millis() - lastConfigPoll >= CONFIG_POLL_MS) {
     lastConfigPoll = millis();
     pollConfig();
-    if (configSyncFailed) {
-      lastConfigPoll += CONFIG_POLL_MS * 4;
-    }
   }
 
   if (sysState == STATE_UNLOCKED) {
