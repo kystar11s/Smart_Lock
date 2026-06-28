@@ -123,15 +123,18 @@ unsigned long lastOledRefresh = 0;
 
 // ==================== BLE 回调 ====================
 
+void onAccessGranted(const char* method);
+void onAccessDenied(const char* method);
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     bleConnected = true;
     Serial.println("[BLE] 设备已连接");
   }
-  void onDisconnect(BLEServer* pServer) {
+  void onDisconnect(BLEServer* server) {
     bleConnected = false;
     Serial.println("[BLE] 设备已断开");
-    pServer->getAdvertising()->start();
+    BLEDevice::startAdvertising();
   }
 };
 
