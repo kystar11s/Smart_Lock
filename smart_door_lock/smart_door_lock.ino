@@ -289,31 +289,30 @@ void oledShowPassword() {
       u8g2.print("_");
   }
 
-  // 失败次数提示
+  // 失败次数提示 (仅在未锁定且有失败记录时显示小字)
   if (failCount > 0 && millis() >= lockoutUntil) {
     int remain = FAIL_THRESHOLD - failCount;
     char hint[24];
-    sprintf(hint, "注意: 还剩%d次", remain);
-    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-    int hw = u8g2.getUTF8Width(hint);
-    u8g2.drawUTF8((128 - hw) / 2, 34, hint);
+    sprintf(hint, "注意:还剩%d次", remain);
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(40, 32, hint);
   }
 
-  u8g2.drawHLine(0, 37, 128);
+  u8g2.drawHLine(0, 34, 128);
 
-  // 键盘 (不超框)
-  int gy = 38;
+  // 键盘 4x4 (不超框)
+  int gy = 35;
   int cw = 31;
-  int ch = 9;
+  int ch = 7;
 
-  for (int r = 0; r <= 3; r++)
+  for (int r = 0; r <= 4; r++)
     u8g2.drawHLine(1, gy + r * ch, 126);
   for (int c = 0; c <= 4; c++)
-    u8g2.drawVLine(1 + c * cw, gy, 27);
+    u8g2.drawVLine(1 + c * cw, gy, 28);
 
-  for (int r = 0; r < 3; r++) {
+  for (int r = 0; r < 4; r++) {
     for (int c = 0; c < 4; c++) {
-      u8g2.setCursor(2 + c * cw + 8, gy + r * ch + 7);
+      u8g2.setCursor(2 + c * cw + 8, gy + r * ch + 6);
       u8g2.print(keyLabels[r][c]);
     }
   }
@@ -590,8 +589,13 @@ void onAccessDenied(const char *method) {
   camCapture(method, false);
   delay(1500);
   resetPwdInput();
-  if (pwdInputMode) oledShowPassword();
-  else oledShowMain();
+  if (millis() < lockoutUntil) {
+    oledShowLockout();
+  } else if (pwdInputMode) {
+    oledShowPassword();
+  } else {
+    oledShowMain();
+  }
 }
 
 void autoLock() {
