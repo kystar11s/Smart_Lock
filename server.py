@@ -450,6 +450,7 @@ ADMIN_HTML = '''
         .m-rfid { background: rgba(0,212,255,0.15); color: #00d4ff; }
         .m-fp { background: rgba(46,213,115,0.15); color: #2ed573; }
         .m-pwd { background: rgba(255,165,2,0.15); color: #ffa502; }
+        .m-ble { background: rgba(155,89,182,0.15); color: #b569d9; }
         .m-unknown { background: rgba(136,136,136,0.15); color: #888; }
         .r-success { background: rgba(46,213,115,0.15); color: #2ed573; }
         .r-fail { background: rgba(255,71,87,0.15); color: #ff4757; }
@@ -835,8 +836,8 @@ ADMIN_HTML = '''
                  + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
         }
         function methodBadge(m) {
-            const cls = m === 'RFID' ? 'm-rfid' : m === '指纹' ? 'm-fp' : m === '密码' ? 'm-pwd' : 'm-unknown';
-            const txt = m === 'RFID' ? 'RFID刷卡' : m === '指纹' ? '指纹识别' : m === '密码' ? '密码输入' : m;
+            const map = {'RFID': ['m-rfid','RFID刷卡'], '指纹': ['m-fp','指纹识别'], '密码': ['m-pwd','密码输入'], '蓝牙': ['m-ble','蓝牙开锁']};
+            const [cls, txt] = map[m] || ['m-unknown', m];
             return '<span class="badge ' + cls + '">' + txt + '</span>';
         }
         function resultBadge(r) {
@@ -1193,7 +1194,7 @@ def upload():
         insert_log(filename, timestamp, method, result, size)
         print(f"[UPLOAD] {filename} | {method} | {result}")
         t = time.strftime('%H:%M:%S', time.localtime(timestamp))
-        method_cn = {'RFID': 'RFID刷卡', '指纹': '指纹识别', '密码': '密码输入'}.get(method, method)
+        method_cn = {'RFID': 'RFID刷卡', '指纹': '指纹识别', '密码': '密码输入', '蓝牙': '蓝牙开锁'}.get(method, method)
         result_cn = '成功' if result == 'SUCCESS' else '失败'
         evt = 'success' if result == 'SUCCESS' else 'fail'
         send_notification(f'门禁{result_cn}', f'{t} {method_cn} {result_cn}', evt)
