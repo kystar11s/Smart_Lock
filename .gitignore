@@ -1,0 +1,5 @@
+uploads/
+access.db
+__pycache__/
+*.bak
+*.pyc
