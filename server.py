@@ -139,7 +139,13 @@ def get_device_status():
     conn = get_db()
     row = conn.execute('SELECT * FROM device_status WHERE id = 1').fetchone()
     conn.close()
-    return dict(row) if row else {'lock_state': 'UNKNOWN', 'cam_online': 0, 'last_update': 0}
+    if not row:
+        return {'lock_state': 'UNKNOWN', 'cam_online': 0, 'last_update': 0}
+    status = dict(row)
+    if status['cam_online'] and status['last_update'] and (time.time() - status['last_update'] > 60):
+        update_cam_online(False)
+        status['cam_online'] = 0
+    return status
 
 def update_cam_online(online):
     conn = get_db()
