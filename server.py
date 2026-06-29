@@ -1181,7 +1181,7 @@ ADMIN_HTML = '''
             s1.style.background = '#333'; s2.style.background = '#333'; s3.style.background = '#333';
             if (v.length === 0) { hint.textContent = ''; return; }
             let score = 0;
-            if (/^(\d)\1{3}$/.test(v)) { hint.textContent = '❌ 不要使用重复数字'; hint.style.color = '#ff4757'; }
+            if (/^(\\d)\\1{3}$/.test(v)) { hint.textContent = '❌ 不要使用重复数字'; hint.style.color = '#ff4757'; }
             else if (/^(0123|1234|2345|3456|4567|5678|6789|9876|8765|7654|6543|5432|4321|3210)/.test(v)) { hint.textContent = '⚠️ 连续数字不够安全'; hint.style.color = '#ffa502'; score = 1; }
             else { hint.textContent = '✨ 密码强度不错'; hint.style.color = '#2ed573'; score = 2; }
             if (v.length >= 1) s1.style.background = score >= 0 ? '#2ed573' : '#ff4757';
