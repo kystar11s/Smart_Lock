@@ -1404,6 +1404,17 @@ def api_alert():
         print(f"[ALERT] 暴力破解告警: {count}次连续错误")
     return jsonify({'success': True}), 200
 
+@app.route('/api/log', methods=['POST'])
+def api_log():
+    data = request.json
+    if data:
+        method = data.get('method', 'UNKNOWN')
+        result = data.get('result', 'UNKNOWN')
+        ts = data.get('timestamp', int(time.time()))
+        insert_log('offline.jpg', ts, method, result, 0)
+        print(f"[LOG] 离线记录补传: {method} {result}")
+    return jsonify({'success': True}), 200
+
 @app.route('/api/status')
 def api_status():
     return jsonify(get_device_status())

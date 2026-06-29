@@ -15,6 +15,7 @@
 #include <HTTPClient.h>
 #include <time.h>
 #include "BluetoothSerial.h"
+#include <Preferences.h>
 
 // ==================== WiFi ====================
 #define WIFI_SSID     "ky"
@@ -78,6 +79,19 @@ int fpBlackCount = 0;
 
 // ==================== 经典蓝牙 SPP ====================
 BluetoothSerial SerialBT;
+
+// ==================== Flash持久化 ====================
+Preferences prefs;
+
+// ==================== 离线日志缓存 ====================
+#define MAX_OFFLINE_LOGS 20
+struct OfflineLog {
+  char method[8];
+  char result[8];
+  unsigned long timestamp;
+};
+OfflineLog offlineLogs[MAX_OFFLINE_LOGS];
+int offlineLogCount = 0;
 
 // ==================== OLED (U8g2) ====================
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, PIN_SCL, PIN_SDA);
@@ -579,6 +593,7 @@ void onAccessGranted(const char *method) {
   oledShowGranted();
   camReportStatus("UNLOCKED");
   camCapture(method, true);
+  addOfflineLog(method, true);
   delay(1500);
 }
 
@@ -592,6 +607,7 @@ void onAccessDenied(const char *method) {
   if (strcmp(method, "FP") == 0) fpLED_blinkRed();
   oledShowDenied();
   camCapture(method, false);
+  addOfflineLog(method, false);
   delay(1500);
   resetPwdInput();
   if (millis() < lockoutUntil) {
@@ -1075,6 +1091,7 @@ void pollConfig() {
 
         Serial.printf("[SYNC] v%d pwd=%s rfid=%d/%d fp=%d/%d bl_rfid=%d bl_fp=%d\n",
           configVersion, AUTH_PWD, rfidCount, rfidBlackCount, fpCount, fpBlackCount, rfidBlackCount, fpBlackCount);
+        saveConfigToFlash();
       }
     }
   }
@@ -1099,6 +1116,84 @@ void pollConfig() {
   }
 }
 
+// ==================== Flash 持久化 ====================
+
+void saveConfigToFlash() {
+  prefs.begin("smartlock", false);
+  prefs.putBytes("password", AUTH_PWD, PWD_LEN + 1);
+  prefs.putUChar("rfidCount", rfidCount);
+  prefs.putBytes("rfidList", rfidList, rfidCount * UID_LEN);
+  prefs.putUChar("fpCount", fpCount);
+  prefs.putBytes("fpList", fpList, fpCount * sizeof(int));
+  prefs.putUChar("rfidBlCount", rfidBlackCount);
+  prefs.putBytes("rfidBlackList", rfidBlackList, rfidBlackCount * UID_LEN);
+  prefs.putUChar("fpBlCount", fpBlackCount);
+  prefs.putBytes("fpBlackList", fpBlackList, fpBlackCount * sizeof(int));
+  prefs.putUInt("configVer", configVersion);
+  prefs.end();
+  Serial.println("[FLASH] 配置已保存到Flash");
+}
+
+void loadConfigFromFlash() {
+  prefs.begin("smartlock", true);
+  if (prefs.isKey("password")) {
+    prefs.getBytes("password", AUTH_PWD, PWD_LEN + 1);
+    rfidCount = prefs.getUChar("rfidCount", 0);
+    if (rfidCount > 0) prefs.getBytes("rfidList", rfidList, rfidCount * UID_LEN);
+    fpCount = prefs.getUChar("fpCount", 0);
+    if (fpCount > 0) prefs.getBytes("fpList", fpList, fpCount * sizeof(int));
+    rfidBlackCount = prefs.getUChar("rfidBlCount", 0);
+    if (rfidBlackCount > 0) prefs.getBytes("rfidBlackList", rfidBlackList, rfidBlackCount * UID_LEN);
+    fpBlackCount = prefs.getUChar("fpBlCount", 0);
+    if (fpBlackCount > 0) prefs.getBytes("fpBlackList", fpBlackList, fpBlackCount * sizeof(int));
+    configVersion = prefs.getUInt("configVer", 0);
+    Serial.printf("[FLASH] 从Flash加载: pwd=%s rfid=%d fp=%d bl_rfid=%d bl_fp=%d v%d\n",
+      AUTH_PWD, rfidCount, fpCount, rfidBlackCount, fpBlackCount, configVersion);
+  } else {
+    Serial.println("[FLASH] Flash无数据，使用默认配置");
+  }
+  prefs.end();
+}
+
+// ==================== 离线日志缓存 ====================
+
+void addOfflineLog(const char* method, bool success) {
+  if (offlineLogCount >= MAX_OFFLINE_LOGS) {
+    Serial.println("[LOG] 离线日志已满，丢弃最早记录");
+    for (int i = 0; i < MAX_OFFLINE_LOGS - 1; i++) {
+      offlineLogs[i] = offlineLogs[i + 1];
+    }
+    offlineLogCount = MAX_OFFLINE_LOGS - 1;
+  }
+  strncpy(offlineLogs[offlineLogCount].method, method, 7);
+  offlineLogs[offlineLogCount].method[7] = '\0';
+  strncpy(offlineLogs[offlineLogCount].result, success ? "SUCCESS" : "FAIL", 7);
+  offlineLogs[offlineLogCount].timestamp = millis() / 1000 + GMT_OFFSET;
+  offlineLogCount++;
+  Serial.printf("[LOG] 缓存离线记录: %s %s (共%d条)\n", method, success ? "SUCCESS" : "FAIL", offlineLogCount);
+}
+
+void uploadOfflineLogs() {
+  if (offlineLogCount == 0 || WiFi.status() != WL_CONNECTED) return;
+  Serial.printf("[LOG] 上传%d条离线记录...\n", offlineLogCount);
+  for (int i = 0; i < offlineLogCount; i++) {
+    WiFiClient client;
+    client.setTimeout(500);
+    if (!client.connect(SERVER_HOST, SERVER_PORT)) break;
+    String body = "{\"method\":\"" + String(offlineLogs[i].method) +
+                  "\",\"result\":\"" + String(offlineLogs[i].result) +
+                  "\",\"timestamp\":" + String(offlineLogs[i].timestamp) + "}";
+    String req = "POST /api/log HTTP/1.1\r\nHost: " + String(SERVER_HOST) +
+                 "\r\nContent-Type: application/json\r\nContent-Length: " + String(body.length()) +
+                 "\r\nConnection: close\r\n\r\n" + body;
+    client.print(req);
+    delay(100);
+    client.stop();
+  }
+  Serial.printf("[LOG] 离线记录上传完成\n");
+  offlineLogCount = 0;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -1109,6 +1204,7 @@ void setup() {
 
   showBanner();
   Serial.println("  初始化硬件:");
+  loadConfigFromFlash();
   initOLED();
   initWiFi();
   initRFID();
@@ -1151,6 +1247,8 @@ void loop() {
     delay(500);
     return;
   }
+
+  uploadOfflineLogs();
 
   if (sysState == STATE_IDLE) {
     handleKeypad();
