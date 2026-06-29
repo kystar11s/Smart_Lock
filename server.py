@@ -1471,7 +1471,7 @@ def api_export_csv():
         t = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(log['timestamp']))
         method = log['method']
         result = '成功' if log['result'] == 'SUCCESS' else '失败'
-        output.write(f"{t},{method},{result},{log['filename']},{log['size']}\n")
+        output.write(f'"{t}",{method},{result},{log["filename"]},{log["size"]}\n')
     from flask import Response
     return Response(output.getvalue(), mimetype='text/csv',
                     headers={'Content-Disposition': 'attachment; filename=access_logs.csv'})
