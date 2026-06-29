@@ -232,7 +232,7 @@ void oledShowMain() {
 
   // 大字时间 (居中)
   String timeStr = getTimeString();
-  u8g2.setFont(u8g2_font_logisoso20_tf);
+  u8g2.setFont(u8g2_font_logisoso16_tf);
   int tw = u8g2.getUTF8Width(timeStr.c_str());
   u8g2.drawUTF8((128 - tw) / 2, 30, timeStr.c_str());
 
