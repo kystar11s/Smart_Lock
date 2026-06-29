@@ -154,7 +154,6 @@ void handleBluetoothApp() {
   if (value == AUTH_PWD) {
     SerialBT.println("OK");
     Serial.println("[BT] 密码正确 开锁!");
-    failCount = 0;
     onAccessGranted("蓝牙");
   } else {
     SerialBT.println("FAIL");
@@ -568,6 +567,8 @@ void camReportStatus(const char *status) {
 void onAccessGranted(const char *method) {
   if (sysState == STATE_UNLOCKED) return;
   Serial.printf("  >> %s 验证通过! 开锁!\n", method);
+  failCount = 0;
+  lockoutUntil = 0;
   beep(1, 100);
   digitalWrite(PIN_LED, HIGH);
   lockServo.write(ANGLE_UNLOCK);
@@ -624,7 +625,6 @@ void checkPassword() {
   pwdBuf[PWD_LEN] = '\0';
   if (strcmp(pwdBuf, AUTH_PWD) == 0) {
     Serial.println("[密码] 验证通过");
-    failCount = 0;
     onAccessGranted("密码");
   } else {
     failCount++;
@@ -647,6 +647,11 @@ void handleKeypad() {
   if (millis() < lockoutUntil) {
     oledShowLockout();
     return;
+  }
+
+  // 锁定刚到期，重置失败计数
+  if (failCount >= FAIL_THRESHOLD) {
+    failCount = 0;
   }
 
   if (!pwdInputMode) {
