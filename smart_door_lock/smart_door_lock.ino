@@ -1015,8 +1015,9 @@ void pollConfig() {
             int pos = 0;
             while (pos < arr.length() && fpCount < MAX_FP) {
               while (pos < arr.length() && (arr[pos] == ' ' || arr[pos] == ',')) pos++;
+              if (pos >= arr.length()) break;
               int e = arr.indexOf(",", pos);
-              if (e < 0) e = arr.indexOf("]", pos);
+              if (e < 0) e = arr.length();
               if (e > pos) {
                 fpList[fpCount] = arr.substring(pos, e).toInt();
                 fpCount++;
@@ -1060,8 +1061,9 @@ void pollConfig() {
             int pos = 0;
             while (pos < arr.length() && fpBlackCount < MAX_FP_BL) {
               while (pos < arr.length() && (arr[pos] == ' ' || arr[pos] == ',')) pos++;
+              if (pos >= arr.length()) break;
               int e = arr.indexOf(",", pos);
-              if (e < 0) e = arr.indexOf("]", pos);
+              if (e < 0) e = arr.length();
               if (e > pos) {
                 fpBlackList[fpBlackCount] = arr.substring(pos, e).toInt();
                 fpBlackCount++;
