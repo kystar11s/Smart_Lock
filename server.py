@@ -1465,7 +1465,7 @@ def api_notify_test():
 def api_export_csv():
     import io
     output = io.StringIO()
-    output.write('时间,验证方式,结果,文件名,大小\n')
+    output.write('\ufeff时间,验证方式,结果,文件名,大小\n')
     logs = get_all_logs()
     for log in logs:
         t = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(log['timestamp']))
