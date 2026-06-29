@@ -1092,6 +1092,7 @@ void pollConfig() {
         Serial.printf("[SYNC] v%d pwd=%s rfid=%d/%d fp=%d/%d bl_rfid=%d bl_fp=%d\n",
           configVersion, AUTH_PWD, rfidCount, rfidBlackCount, fpCount, fpBlackCount, rfidBlackCount, fpBlackCount);
         saveConfigToFlash();
+        uploadOfflineLogs();
       }
     }
   }
@@ -1167,7 +1168,7 @@ void addOfflineLog(const char* method, bool success) {
   }
   strncpy(offlineLogs[offlineLogCount].method, method, 7);
   offlineLogs[offlineLogCount].method[7] = '\0';
-  strncpy(offlineLogs[offlineLogCount].result, success ? "SUCCESS" : "FAIL", 7);
+  strncpy(offlineLogs[offlineLogCount].result, success ? "SUCCESS" : "FAIL", 8);
   offlineLogs[offlineLogCount].timestamp = millis() / 1000 + GMT_OFFSET;
   offlineLogCount++;
   Serial.printf("[LOG] 缓存离线记录: %s %s (共%d条)\n", method, success ? "SUCCESS" : "FAIL", offlineLogCount);
@@ -1176,6 +1177,7 @@ void addOfflineLog(const char* method, bool success) {
 void uploadOfflineLogs() {
   if (offlineLogCount == 0 || WiFi.status() != WL_CONNECTED) return;
   Serial.printf("[LOG] 上传%d条离线记录...\n", offlineLogCount);
+  int uploaded = 0;
   for (int i = 0; i < offlineLogCount; i++) {
     WiFiClient client;
     client.setTimeout(500);
@@ -1189,9 +1191,15 @@ void uploadOfflineLogs() {
     client.print(req);
     delay(100);
     client.stop();
+    uploaded++;
   }
-  Serial.printf("[LOG] 离线记录上传完成\n");
-  offlineLogCount = 0;
+  if (uploaded < offlineLogCount) {
+    for (int i = 0; i < offlineLogCount - uploaded; i++) {
+      offlineLogs[i] = offlineLogs[uploaded + i];
+    }
+  }
+  offlineLogCount -= uploaded;
+  Serial.printf("[LOG] 上传完成 %d条 剩余%d条\n", uploaded, offlineLogCount);
 }
 
 void setup() {
@@ -1247,8 +1255,6 @@ void loop() {
     delay(500);
     return;
   }
-
-  uploadOfflineLogs();
 
   if (sysState == STATE_IDLE) {
     handleKeypad();
