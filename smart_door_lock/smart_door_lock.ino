@@ -223,8 +223,6 @@ void oledShowMain() {
   else
     u8g2.drawStr(78, 9, "---");
   u8g2.drawStr(100, 9, "BT");
-
-  // 小锁图标
   if (sysState == STATE_UNLOCKED) {
     u8g2.drawRFrame(116, 2, 8, 7, 2);
   } else {
@@ -232,24 +230,25 @@ void oledShowMain() {
   }
   u8g2.setDrawColor(1);
 
-  // 中央大字时间
+  // 大字时间 (居中)
   String timeStr = getTimeString();
   u8g2.setFont(u8g2_font_logisoso20_tf);
   int tw = u8g2.getUTF8Width(timeStr.c_str());
-  u8g2.drawUTF8((128 - tw) / 2, 32, timeStr.c_str());
+  u8g2.drawUTF8((128 - tw) / 2, 30, timeStr.c_str());
 
-  // 日期 (时间下方居中)
+  // 日期含年份 (时间下方居中)
   String dateStr = getDateString();
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
   int dw = u8g2.getUTF8Width(dateStr.c_str());
-  u8g2.drawUTF8((128 - dw) / 2, 44, dateStr.c_str());
+  u8g2.drawUTF8((128 - dw) / 2, 42, dateStr.c_str());
 
   // 分隔线
-  u8g2.drawHLine(0, 47, 128);
+  u8g2.drawHLine(0, 45, 128);
 
   // 锁定倒计时 or 底部三列
   if (millis() < lockoutUntil) {
-    int remain = (lockoutUntil - millis()) / 1000 + 1;
+    int remain = (lockoutUntil - millis()) / 1000;
+    if (remain < 1) remain = 1;
     char lockBuf[20];
     sprintf(lockBuf, "已锁定 %ds", remain);
     u8g2.setFont(u8g2_font_wqy12_t_gb2312);
@@ -261,8 +260,8 @@ void oledShowMain() {
     u8g2.drawUTF8(52, 57, "指纹");
     u8g2.drawUTF8(96, 57, "密码");
 
-    u8g2.drawVLine(40, 48, 15);
-    u8g2.drawVLine(84, 48, 15);
+    u8g2.drawVLine(40, 46, 17);
+    u8g2.drawVLine(84, 46, 17);
   }
 
   u8g2.sendBuffer();
@@ -294,13 +293,13 @@ void oledShowPassword() {
       u8g2.print("_");
   }
 
-  // 失败次数提示 (仅在未锁定且有失败记录时显示小字)
+  // 失败次数提示
   if (failCount > 0 && millis() >= lockoutUntil) {
     int remain = FAIL_THRESHOLD - failCount;
-    char hint[24];
-    sprintf(hint, "注意:还剩%d次", remain);
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(40, 32, hint);
+    char hint[20];
+    sprintf(hint, "WARN:%dleft", remain);
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawStr(32, 32, hint);
   }
 
   u8g2.drawHLine(0, 34, 128);
@@ -341,8 +340,8 @@ void oledShowLockout() {
   drawLockIcon(64, 22, true);
 
   // 倒计时
-  int remain = (lockoutUntil - millis()) / 1000 + 1;
-  if (remain < 0) remain = 0;
+  int remain = (lockoutUntil - millis()) / 1000;
+  if (remain < 1) remain = 1;
   char buf[20];
   sprintf(buf, "%d秒后解除", remain);
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
@@ -883,8 +882,8 @@ String getDateString() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) return "--/--";
   const char* weekDays[] = {"日", "一", "二", "三", "四", "五", "六"};
-  char buf[16];
-  sprintf(buf, "%02d-%02d 周%s", timeinfo.tm_mon + 1, timeinfo.tm_mday, weekDays[timeinfo.tm_wday]);
+  char buf[20];
+  sprintf(buf, "%d-%02d-%02d 周%s", timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, weekDays[timeinfo.tm_wday]);
   return String(buf);
 }
 
@@ -1156,6 +1155,8 @@ void loop() {
         oledShowMain();
       } else if (millis() < lockoutUntil) {
         oledShowLockout();
+      } else {
+        oledShowPassword();
       }
     }
   }
