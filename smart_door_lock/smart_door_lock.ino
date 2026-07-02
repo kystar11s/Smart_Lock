@@ -479,9 +479,14 @@ void oledShowAdminMenu() {
   u8g2.drawUTF8(34, 10, "系统管理");
   u8g2.setDrawColor(1);
 
-  // 显示4个可见项，adminPage为滚动偏移
-  int start = adminPage;
-  for (int i = 0; i < 4 && start + i < ADMIN_MENU_COUNT; i++) {
+  // 计算滚动偏移，让选中项尽量居中显示
+  int maxVisible = 4;
+  int start = adminPage - 1;
+  if (start < 0) start = 0;
+  if (start + maxVisible > ADMIN_MENU_COUNT) start = ADMIN_MENU_COUNT - maxVisible;
+  if (start < 0) start = 0;
+
+  for (int i = 0; i < maxVisible && start + i < ADMIN_MENU_COUNT; i++) {
     int y = 24 + i * 12;
     if (start + i == adminPage) {
       u8g2.drawBox(2, y - 9, 124, 12);
@@ -909,16 +914,6 @@ void handleKeypad() {
   // # = 确认提交
   if (key == '#') {
     if (pwdIdx == PWD_LEN) checkPassword();
-    return;
-  }
-
-  // * = 删除最后一位
-  if (key == '*') {
-    if (pwdIdx > 0) {
-      pwdIdx--;
-      pwdBuf[pwdIdx] = '\0';
-      oledShowPassword();
-    }
     return;
   }
 
@@ -1779,6 +1774,16 @@ void setup() {
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.reconnect();
+  }
+
+  // 管理菜单模式：处理键盘，添加RFID时持续检测卡片
+  if (adminMode) {
+    handleKeypad();
+    if (adminSubMode == 1) {
+      // 持续检测RFID卡片（不需要按键触发）
+      handleAdminMenu(0);  // 传0触发RFID扫描检查
+    }
+    return;
   }
 
   if (sysState == STATE_IDLE) {
