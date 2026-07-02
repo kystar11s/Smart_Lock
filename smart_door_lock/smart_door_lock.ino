@@ -1655,7 +1655,7 @@ void syncConfigToServer() {
   if (!client.connect(SERVER_HOST, SERVER_PORT)) return;
 
   // 构建JSON: 同步白名单和密码
-  String body = "{\"password\":\"" + String(AUTH_PWD) + "\",\"rfid_whitelist\":[";
+  String body = "{\"door_password\":\"" + String(AUTH_PWD) + "\",\"rfid_whitelist\":[";
   for (int i = 0; i < rfidCount; i++) {
     if (i > 0) body += ",";
     char buf[16];
