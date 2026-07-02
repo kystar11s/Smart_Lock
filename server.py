@@ -1368,6 +1368,7 @@ def api_whitelist():
 @login_required
 def api_add_whitelist():
     data = request.json
+    if not data: return jsonify({'error': 'bad request'}), 400
     add_whitelist(data['type'], data['value'], data.get('name', ''))
     return jsonify({'success': True}), 200
 
@@ -1386,6 +1387,7 @@ def api_blacklist():
 @login_required
 def api_add_blacklist():
     data = request.json
+    if not data: return jsonify({'error': 'bad request'}), 400
     add_blacklist(data['type'], data['value'], data.get('name', ''))
     return jsonify({'success': True}), 200
 
@@ -1422,6 +1424,7 @@ def api_status():
 @app.route('/api/status', methods=['POST'])
 def api_update_status():
     data = request.json
+    if not data: return jsonify({'error': 'bad request'}), 400
     if 'lock_state' in data:
         update_device_status(data['lock_state'])
     if 'cam_online' in data:
@@ -1436,6 +1439,7 @@ def api_get_config():
 @login_required
 def api_set_config():
     data = request.json
+    if not data: return jsonify({'error': 'bad request'}), 400
     if 'door_password' in data:
         set_setting('door_password', data['door_password'])
         bump_config_version()
@@ -1465,6 +1469,7 @@ def api_get_notify_settings():
 @login_required
 def api_notify_settings():
     data = request.json
+    if not data: return jsonify({'error': 'bad request'}), 400
     if 'serverchan_key' in data:
         set_setting('serverchan_key', data['serverchan_key'])
     if 'notify_events' in data:

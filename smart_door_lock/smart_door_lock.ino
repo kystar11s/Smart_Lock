@@ -488,6 +488,7 @@ bool fpReadPacket(unsigned long timeoutMs) {
     if (!fpSerial.available()) continue;
     uint8_t b = fpSerial.read();
     if (fpBufLen == 0 && b != 0xEF) continue;
+    if (fpBufLen >= 63) { fpBufLen = 0; continue; }
     fpBuf[fpBufLen++] = b;
     if (fpBufLen >= 9) {
       uint16_t L = (fpBuf[7] << 8) | fpBuf[8];
@@ -782,6 +783,7 @@ void fpPoll() {
   while (fpSerial.available()) {
     uint8_t b = fpSerial.read();
     if (fpBufLen == 0 && b != 0xEF) continue;
+    if (fpBufLen >= 63) { fpBufLen = 0; continue; }
     fpBuf[fpBufLen++] = b;
     if (fpBufLen >= 9) {
       uint16_t L = (fpBuf[7] << 8) | fpBuf[8];
@@ -1252,8 +1254,6 @@ void setup() {
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.reconnect();
-    delay(500);
-    return;
   }
 
   if (sysState == STATE_IDLE) {
