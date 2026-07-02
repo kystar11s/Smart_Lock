@@ -540,8 +540,12 @@ void oledShowAdminDelList() {
   if (rfidCount == 0) {
     u8g2.drawUTF8(24, 36, "列表为空");
   } else {
-    int start = adminSelIdx;
-    for (int i = 0; i < 4 && start + i < rfidCount; i++) {
+    int maxVisible = 4;
+    int start = adminSelIdx - 1;
+    if (start < 0) start = 0;
+    if (start + maxVisible > rfidCount) start = rfidCount - maxVisible;
+    if (start < 0) start = 0;
+    for (int i = 0; i < maxVisible && start + i < rfidCount; i++) {
       int y = 24 + i * 12;
       if (start + i == adminSelIdx) {
         u8g2.drawBox(2, y - 9, 124, 12);
@@ -587,8 +591,12 @@ void oledShowAdminDelFpList() {
   if (fpCount == 0) {
     u8g2.drawUTF8(24, 36, "列表为空");
   } else {
-    int start = adminSelIdx;
-    for (int i = 0; i < 4 && start + i < fpCount; i++) {
+    int maxVisible = 4;
+    int start = adminSelIdx - 1;
+    if (start < 0) start = 0;
+    if (start + maxVisible > fpCount) start = fpCount - maxVisible;
+    if (start < 0) start = 0;
+    for (int i = 0; i < maxVisible && start + i < fpCount; i++) {
       int y = 24 + i * 12;
       if (start + i == adminSelIdx) {
         u8g2.drawBox(2, y - 9, 124, 12);
