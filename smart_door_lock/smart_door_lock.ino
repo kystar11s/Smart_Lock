@@ -498,8 +498,8 @@ void oledShowAdminMenu() {
 
   // 底部提示
   u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawStr(4, 60, "2=Down 8=Up");
-  u8g2.drawStr(80, 60, "#OK D=Back");
+  u8g2.drawStr(8, 61, "8:Down 2:Up");
+  u8g2.drawStr(76, 61, "#OK D:Back");
 
   u8g2.sendBuffer();
 }
@@ -869,10 +869,9 @@ void handleKeypad() {
   // 按下 * 时记录时间
   if (key == '*') {
     starPressTs = millis();
-    if (adminMode) {
-      // 管理菜单中 * 不做特殊处理
+    if (adminMode && (adminSubMode == 3 || adminSubMode == 6)) {
+      handleAdminMenu(key);
     } else if (pwdInputMode) {
-      // 密码输入中 * = 删除最后一位
       if (pwdIdx > 0) {
         pwdIdx--;
         pwdBuf[pwdIdx] = '\0';
@@ -999,15 +998,19 @@ void handleAdminMenu(char key) {
       return;
     }
     if (key == 'B') { resetPwdInput(); oledShowAdminChangePwd(); return; }
+    if (key == '*') {
+      if (pwdIdx > 0) { pwdIdx--; pwdBuf[pwdIdx] = '\0'; oledShowAdminChangePwd(); }
+      return;
+    }
     return;
   }
 
   // 子模式0 = 主菜单
   if (adminSubMode == 0) {
-    if (key == '2') {
+    if (key == '8') {
       if (adminPage < ADMIN_MENU_COUNT - 1) adminPage++;
       oledShowAdminMenu();
-    } else if (key == '8') {
+    } else if (key == '2') {
       if (adminPage > 0) adminPage--;
       oledShowAdminMenu();
     } else if (key == '#' || key == 'C') {
@@ -1074,10 +1077,10 @@ void handleAdminMenu(char key) {
       if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); }
       return;
     }
-    if (key == '2') {
+    if (key == '8') {
       if (adminSelIdx < rfidCount - 1) adminSelIdx++;
       oledShowAdminDelList();
-    } else if (key == '8') {
+    } else if (key == '2') {
       if (adminSelIdx > 0) adminSelIdx--;
       oledShowAdminDelList();
     } else if (key == '#' || key == 'C') {
@@ -1160,10 +1163,10 @@ void handleAdminMenu(char key) {
       if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); }
       return;
     }
-    if (key == '2') {
+    if (key == '8') {
       if (adminSelIdx < fpCount - 1) adminSelIdx++;
       oledShowAdminDelFpList();
-    } else if (key == '8') {
+    } else if (key == '2') {
       if (adminSelIdx > 0) adminSelIdx--;
       oledShowAdminDelFpList();
     } else if (key == '#' || key == 'C') {
@@ -1211,6 +1214,10 @@ void handleAdminMenu(char key) {
       return;
     }
     if (key == 'A') {
+      if (pwdIdx > 0) { pwdIdx--; pwdBuf[pwdIdx] = '\0'; oledShowAdminChangePwd(); }
+      return;
+    }
+    if (key == '*') {
       if (pwdIdx > 0) { pwdIdx--; pwdBuf[pwdIdx] = '\0'; oledShowAdminChangePwd(); }
       return;
     }
