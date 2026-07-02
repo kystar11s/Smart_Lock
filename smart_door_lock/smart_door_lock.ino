@@ -1232,7 +1232,8 @@ void handleAdminMenu(char key) {
             }
             if (!used) { pageId = i; break; }
           }
-          fpSend(0x06, &pageId, 2);  // STORE_CHAR(pageId)
+          uint8_t storePkt[3] = { 0x01, (uint8_t)(pageId >> 8), (uint8_t)(pageId & 0xFF) };
+          fpSend(0x06, storePkt, 3);  // STORE_CHAR(buf=1, pageId)
           fpEnrollTs = millis();
           fpEnrollStep = 8;
           Serial.printf("[ADMIN] 合并成功 存储到页%d\n", pageId);
