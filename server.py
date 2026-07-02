@@ -6,7 +6,7 @@ import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
+app.secret_key = 'smartlock_secret_key_2026'
 
 UPLOAD_FOLDER = 'uploads'
 DB_FILE = 'access.db'
@@ -1507,4 +1507,4 @@ if __name__ == '__main__':
     print(f"  数据库:   {DB_FILE}")
     print(f"  照片目录: {UPLOAD_FOLDER}/")
     print("=" * 50)
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=False)
