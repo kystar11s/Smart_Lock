@@ -496,11 +496,6 @@ void oledShowAdminMenu() {
     u8g2.setDrawColor(1);
   }
 
-  // 底部提示
-  u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawStr(8, 61, "8:Down 2:Up");
-  u8g2.drawStr(76, 61, "#OK D:Back");
-
   u8g2.sendBuffer();
 }
 
@@ -1784,12 +1779,14 @@ void loop() {
     WiFi.reconnect();
   }
 
-  // 管理菜单模式：处理键盘，添加RFID时持续检测卡片
+  // 管理菜单模式：处理键盘，添加RFID/指纹时持续检测
   if (adminMode) {
     handleKeypad();
     if (adminSubMode == 1) {
-      // 持续检测RFID卡片（不需要按键触发）
-      handleAdminMenu(0);  // 传0触发RFID扫描检查
+      handleAdminMenu(0);  // 持续RFID扫描
+    }
+    if (adminSubMode == 4 && fpState == FP_LISTENING) {
+      handleAdminMenu(0);  // 持续指纹串口轮询
     }
     return;
   }
