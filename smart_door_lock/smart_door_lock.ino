@@ -1144,6 +1144,7 @@ void handleAdminMenu(char key) {
     if (key == 'D') {
       adminSubMode = 0;
       fpEnrollStep = 0;
+      fpSend(0x30, NULL, 0);  // PS_Cancel 取消指纹操作
       oledShowAdminMenu();
       return;
     }
@@ -1162,6 +1163,7 @@ void handleAdminMenu(char key) {
       if (millis() - fpEnrollTs > FP_ENROLL_TIMEOUT) {
         Serial.println("[ADMIN] 指纹录入超时");
         fpEnrollStep = 0;
+        fpSend(0x30, NULL, 0);  // PS_Cancel
         oledShowAdminResult(false, "超时 重试");
         delay(1500);
         oledShowAdminAddFp();
@@ -1185,6 +1187,7 @@ void handleAdminMenu(char key) {
           } else {
             Serial.printf("[ADMIN] step%d 特征生成失败\n", fpEnrollStep);
             fpEnrollStep = 0;
+            fpSend(0x30, NULL, 0);
             oledShowAdminResult(false, "特征生成失败");
             delay(1500);
             oledShowAdminAddFp();
@@ -1196,6 +1199,7 @@ void handleAdminMenu(char key) {
         } else {
           Serial.printf("[ADMIN] step%d GET_IMAGE失败 ack=0x%02X\n", fpEnrollStep, ack);
           fpEnrollStep = 0;
+          fpSend(0x30, NULL, 0);
           oledShowAdminResult(false, "录入失败");
           delay(1500);
           oledShowAdminAddFp();
@@ -1241,6 +1245,7 @@ void handleAdminMenu(char key) {
         } else {
           Serial.printf("[ADMIN] 合并失败 ack=0x%02X\n", fpAck());
           fpEnrollStep = 0;
+          fpSend(0x30, NULL, 0);
           oledShowAdminResult(false, "合并失败");
           delay(1500);
           oledShowAdminAddFp();
@@ -1253,6 +1258,45 @@ void handleAdminMenu(char key) {
     if (fpEnrollStep == 8) {
       if (millis() - fpEnrollTs > 3000) {
         fpEnrollStep = 0;
+        fpSend(0x30, NULL, 0);
+        oledShowAdminResult(false, "合并超时");
+        delay(1500);
+        oledShowAdminAddFp();
+        return;
+      }
+      if (fpReadResponse(300)) {
+        if (fpAck() == 0x00) {
+          // 合并成功 → 找空闲页存储
+          uint16_t pageId = 0;
+          for (int i = 0; i < 100; i++) {
+            bool used = false;
+            for (int j = 0; j < fpCount; j++) {
+              if (fpList[j] == i) { used = true; break; }
+            }
+            if (!used) { pageId = i; break; }
+          }
+          uint8_t storePkt2[3] = { 0x01, (uint8_t)(pageId >> 8), (uint8_t)(pageId & 0xFF) };
+          fpSend(0x06, storePkt2, 3);  // STORE_CHAR(buf=1, pageId)
+          fpEnrollTs = millis();
+          fpEnrollStep = 8;
+          Serial.printf("[ADMIN] 合并成功 存储到页%d\n", pageId);
+        } else {
+          Serial.printf("[ADMIN] 合并失败 ack=0x%02X\n", fpAck());
+          fpEnrollStep = 0;
+          fpSend(0x30, NULL, 0);
+          oledShowAdminResult(false, "合并失败");
+          delay(1500);
+          oledShowAdminAddFp();
+        }
+      }
+      return;
+    }
+
+    // step 8: 等待存储结果
+    if (fpEnrollStep == 8) {
+      if (millis() - fpEnrollTs > 3000) {
+        fpEnrollStep = 0;
+        fpSend(0x30, NULL, 0);
         oledShowAdminResult(false, "存储超时");
         delay(1500);
         oledShowAdminAddFp();
@@ -1275,6 +1319,7 @@ void handleAdminMenu(char key) {
         } else {
           Serial.printf("[ADMIN] 存储失败 ack=0x%02X\n", fpAck());
           oledShowAdminResult(false, "存储失败");
+          fpSend(0x30, NULL, 0);
         }
         delay(1500);
         oledShowAdminAddFp();
@@ -1917,8 +1962,8 @@ void loop() {
     if (adminSubMode == 1) {
       handleAdminMenu(0);  // 持续RFID扫描
     }
-    if (adminSubMode == 4 && fpEnrollStep >= 1) {
-      handleAdminMenu(0);  // 持续指纹串口轮询
+    if (adminSubMode == 4) {
+      handleAdminMenu(0);  // 持续指纹轮询（含启动）
     }
     return;
   }
