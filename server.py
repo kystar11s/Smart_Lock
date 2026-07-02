@@ -1436,12 +1436,32 @@ def api_get_config():
     return jsonify(get_config_for_esp32())
 
 @app.route('/api/config', methods=['POST'])
-@login_required
 def api_set_config():
     data = request.json
     if not data: return jsonify({'error': 'bad request'}), 400
+    changed = False
     if 'door_password' in data:
         set_setting('door_password', data['door_password'])
+        changed = True
+    if 'rfid_whitelist' in data:
+        conn = get_db()
+        conn.execute('DELETE FROM whitelist WHERE type="rfid"')
+        for uid in data['rfid_whitelist']:
+            conn.execute('INSERT INTO whitelist (type, value, name, created_at) VALUES (?, ?, ?, ?)',
+                         ('rfid', uid, '', int(time.time())))
+        conn.commit()
+        conn.close()
+        changed = True
+    if 'fp_whitelist' in data:
+        conn = get_db()
+        conn.execute('DELETE FROM whitelist WHERE type="fp"')
+        for fp_id in data['fp_whitelist']:
+            conn.execute('INSERT INTO whitelist (type, value, name, created_at) VALUES (?, ?, ?, ?)',
+                         ('fp', str(fp_id), '', int(time.time())))
+        conn.commit()
+        conn.close()
+        changed = True
+    if changed:
         bump_config_version()
     return jsonify({'success': True, 'config': get_config_for_esp32()}), 200
 

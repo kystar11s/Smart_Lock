@@ -93,6 +93,21 @@ struct OfflineLog {
 OfflineLog offlineLogs[MAX_OFFLINE_LOGS];
 int offlineLogCount = 0;
 
+// ==================== 管理菜单 ====================
+bool adminMode = false;
+int adminPage = 0;        // 0-5: 菜单页
+#define ADMIN_MENU_COUNT 6
+const char* adminMenuItems[] = {
+  "添加RFID卡", "删除RFID卡",
+  "添加指纹",   "删除指纹",
+  "修改密码",   "返回主界面"
+};
+// 0=等待操作, 1=等待RFID刷卡, 2=等待指纹按压, 3=输入新密码, 4=确认中
+int adminSubMode = 0;
+int adminSelIdx = 0;      // 删除列表中的选中索引
+unsigned long starPressTs = 0;
+#define LONG_PRESS_MS 800
+
 // ==================== OLED (U8g2) ====================
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, PIN_SCL, PIN_SDA);
 
@@ -453,6 +468,176 @@ void oledShowCountdown() {
   u8g2.sendBuffer();
 }
 
+// ===== 管理菜单 =====
+void oledShowAdminMenu() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  // 标题
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(34, 10, "系统管理");
+  u8g2.setDrawColor(1);
+
+  // 显示4个可见项，adminPage为滚动偏移
+  int start = adminPage;
+  for (int i = 0; i < 4 && start + i < ADMIN_MENU_COUNT; i++) {
+    int y = 24 + i * 12;
+    if (start + i == adminPage) {
+      u8g2.drawBox(2, y - 9, 124, 12);
+      u8g2.setDrawColor(0);
+    }
+    u8g2.drawUTF8(8, y, adminMenuItems[start + i]);
+    u8g2.setDrawColor(1);
+  }
+
+  // 底部提示
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(4, 60, "2=Down 8=Up");
+  u8g2.drawStr(80, 60, "#OK D=Back");
+
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminAddRfid() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(28, 10, "添加RFID卡");
+  u8g2.setDrawColor(1);
+  u8g2.drawUTF8(16, 32, "请将新卡靠近");
+  u8g2.drawUTF8(24, 46, "RFID模块");
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(40, 60, "D=Cancel");
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminAddRfidResult(bool ok, const char* uid) {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  if (ok) {
+    u8g2.drawUTF8(24, 24, "添加成功!");
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawStr(16, 42, uid);
+  } else {
+    u8g2.drawUTF8(16, 24, "添加失败/已存在");
+  }
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminDelList() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(34, 10, "删除RFID卡");
+  u8g2.setDrawColor(1);
+
+  if (rfidCount == 0) {
+    u8g2.drawUTF8(24, 36, "列表为空");
+  } else {
+    int start = adminSelIdx;
+    for (int i = 0; i < 4 && start + i < rfidCount; i++) {
+      int y = 24 + i * 12;
+      if (start + i == adminSelIdx) {
+        u8g2.drawBox(2, y - 9, 124, 12);
+        u8g2.setDrawColor(0);
+      }
+      char buf[20];
+      sprintf(buf, "%d. %02X:%02X:%02X:%02X", start + i + 1,
+        rfidList[start + i][0], rfidList[start + i][1],
+        rfidList[start + i][2], rfidList[start + i][3]);
+      u8g2.drawUTF8(8, y, buf);
+      u8g2.setDrawColor(1);
+    }
+  }
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(4, 60, "#Del D=Back");
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminAddFp() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(28, 10, "添加指纹");
+  u8g2.setDrawColor(1);
+  u8g2.drawUTF8(20, 30, "请将手指放到");
+  u8g2.drawUTF8(20, 44, "指纹模块上");
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(40, 60, "D=Cancel");
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminDelFpList() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(34, 10, "删除指纹");
+  u8g2.setDrawColor(1);
+
+  if (fpCount == 0) {
+    u8g2.drawUTF8(24, 36, "列表为空");
+  } else {
+    int start = adminSelIdx;
+    for (int i = 0; i < 4 && start + i < fpCount; i++) {
+      int y = 24 + i * 12;
+      if (start + i == adminSelIdx) {
+        u8g2.drawBox(2, y - 9, 124, 12);
+        u8g2.setDrawColor(0);
+      }
+      char buf[16];
+      sprintf(buf, "指纹 ID=%d", fpList[start + i]);
+      u8g2.drawUTF8(8, y, buf);
+      u8g2.setDrawColor(1);
+    }
+  }
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(4, 60, "#Del D=Back");
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminChangePwd() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 12);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setDrawColor(0);
+  u8g2.drawUTF8(34, 10, "修改密码");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawFrame(20, 16, 88, 12);
+  u8g2.setFont(u8g2_font_6x10_tf);
+  for (int i = 0; i < PWD_LEN; i++) {
+    u8g2.setCursor(28 + i * 20, 26);
+    if (i < pwdIdx)
+      u8g2.print("*");
+    else
+      u8g2.print("_");
+  }
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.drawUTF8(16, 44, "输入新密码(4位)");
+  u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.drawStr(4, 60, "#OK D=Back");
+  u8g2.sendBuffer();
+}
+
+void oledShowAdminResult(bool ok, const char* msg) {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.drawUTF8(ok ? 40 : 24, 30, ok ? "操作成功" : msg);
+  u8g2.sendBuffer();
+}
+
 // ==================== 蜂鸣器 ====================
 
 void beep(int count, int ms) {
@@ -657,7 +842,50 @@ void checkPassword() {
 
 void handleKeypad() {
   char key = keypad.getKey();
+
+  // 检测长按 * (800ms)
+  if (starPressTs > 0 && !adminMode && millis() - starPressTs >= LONG_PRESS_MS) {
+    if (sysState == STATE_IDLE && millis() >= lockoutUntil && !pwdInputMode) {
+      adminMode = true;
+      adminSubMode = 3;  // 需要密码验证
+      adminPage = 0;
+      adminSelIdx = 0;
+      resetPwdInput();
+      starPressTs = 0;
+      Serial.println("[ADMIN] 长按* 进入管理菜单 - 请验证密码");
+      oledShowAdminChangePwd();
+      return;
+    }
+    starPressTs = 0;
+  }
+
   if (!key) return;
+
+  // 按下 * 时记录时间
+  if (key == '*') {
+    starPressTs = millis();
+    if (adminMode) {
+      // 管理菜单中 * 不做特殊处理
+    } else if (pwdInputMode) {
+      // 密码输入中 * = 删除最后一位
+      if (pwdIdx > 0) {
+        pwdIdx--;
+        pwdBuf[pwdIdx] = '\0';
+        oledShowPassword();
+      }
+    }
+    return;
+  }
+
+  // 按下其他键时取消长按检测
+  if (starPressTs > 0) starPressTs = 0;
+
+  // 管理菜单模式
+  if (adminMode) {
+    handleAdminMenu(key);
+    return;
+  }
+
   if (sysState == STATE_UNLOCKED) return;
 
   // 锁定中检查
@@ -729,6 +957,270 @@ void handleKeypad() {
   if (key >= '0' && key <= '9' && pwdIdx < PWD_LEN) {
     pwdBuf[pwdIdx++] = key;
     oledShowPassword();
+  }
+}
+
+// ==================== 管理菜单处理 ====================
+
+void handleAdminMenu(char key) {
+  // 子模式3 = 密码验证（进入菜单前）
+  if (adminSubMode == 3) {
+    if (!key) {
+      // 密码输入中，检查是否有数字键持续按压的情况
+      // 数字输入已经在下面处理
+    }
+    if (key >= '0' && key <= '9' && pwdIdx < PWD_LEN) {
+      pwdBuf[pwdIdx++] = key;
+      oledShowAdminChangePwd();
+      return;
+    }
+    if (key == '#' || key == 'C') {
+      if (pwdIdx == PWD_LEN) {
+        pwdBuf[PWD_LEN] = '\0';
+        if (strcmp(pwdBuf, AUTH_PWD) == 0) {
+          Serial.println("[ADMIN] 密码验证通过");
+          adminSubMode = 0;
+          adminPage = 0;
+          resetPwdInput();
+          oledShowAdminMenu();
+        } else {
+          Serial.println("[ADMIN] 密码错误");
+          adminMode = false;
+          adminSubMode = 0;
+          oledShowMain();
+          beep(3, 100);
+        }
+      }
+      return;
+    }
+    if (key == 'D' || key == '*') {
+      adminMode = false;
+      adminSubMode = 0;
+      oledShowMain();
+      return;
+    }
+    if (key == 'A') {
+      if (pwdIdx > 0) { pwdIdx--; pwdBuf[pwdIdx] = '\0'; oledShowAdminChangePwd(); }
+      return;
+    }
+    if (key == 'B') { resetPwdInput(); oledShowAdminChangePwd(); return; }
+    return;
+  }
+
+  // 子模式0 = 主菜单
+  if (adminSubMode == 0) {
+    if (key == '2') {
+      if (adminPage < ADMIN_MENU_COUNT - 1) adminPage++;
+      oledShowAdminMenu();
+    } else if (key == '8') {
+      if (adminPage > 0) adminPage--;
+      oledShowAdminMenu();
+    } else if (key == '#' || key == 'C') {
+      switch (adminPage) {
+        case 0: adminSubMode = 1; oledShowAdminAddRfid(); break;
+        case 1: adminSubMode = 2; adminSelIdx = 0; oledShowAdminDelList(); break;
+        case 2: adminSubMode = 4; oledShowAdminAddFp(); break;
+        case 3: adminSubMode = 5; adminSelIdx = 0; oledShowAdminDelFpList(); break;
+        case 4: adminSubMode = 6; resetPwdInput(); oledShowAdminChangePwd(); break;
+        case 5: adminMode = false; oledShowMain(); break;
+      }
+    } else if (key == 'D') {
+      adminMode = false;
+      oledShowMain();
+    }
+    return;
+  }
+
+  // 子模式1 = 添加RFID（等待刷卡）
+  if (adminSubMode == 1) {
+    if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); return; }
+    // 扫描RFID卡片
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+      // 检查是否已存在
+      bool exists = false;
+      for (int c = 0; c < rfidCount; c++) {
+        bool match = true;
+        for (byte i = 0; i < UID_LEN; i++) {
+          if (rfid.uid.uidByte[i] != rfidList[c][i]) { match = false; break; }
+        }
+        if (match) { exists = true; break; }
+      }
+      char uidBuf[20];
+      sprintf(uidBuf, "%02X:%02X:%02X:%02X",
+        rfid.uid.uidByte[0], rfid.uid.uidByte[1],
+        rfid.uid.uidByte[2], rfid.uid.uidByte[3]);
+      if (!exists && rfidCount < MAX_RFID) {
+        for (byte i = 0; i < UID_LEN; i++)
+          rfidList[rfidCount][i] = rfid.uid.uidByte[i];
+        rfidCount++;
+        saveConfigToFlash();
+        syncConfigToServer();
+        Serial.printf("[ADMIN] 添加RFID: %s (共%d张)\n", uidBuf, rfidCount);
+        oledShowAdminAddRfidResult(true, uidBuf);
+        beep(1, 100);
+        delay(1500);
+        oledShowAdminAddRfid();
+      } else {
+        Serial.printf("[ADMIN] RFID已存在或列表满: %s\n", uidBuf);
+        oledShowAdminAddRfidResult(false, uidBuf);
+        beep(3, 100);
+        delay(1500);
+        oledShowAdminAddRfid();
+      }
+      rfid.PICC_HaltA();
+      rfid.PCD_StopCrypto1();
+    }
+    return;
+  }
+
+  // 子模式2 = 删除RFID列表
+  if (adminSubMode == 2) {
+    if (rfidCount == 0) {
+      if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); }
+      return;
+    }
+    if (key == '2') {
+      if (adminSelIdx < rfidCount - 1) adminSelIdx++;
+      oledShowAdminDelList();
+    } else if (key == '8') {
+      if (adminSelIdx > 0) adminSelIdx--;
+      oledShowAdminDelList();
+    } else if (key == '#' || key == 'C') {
+      // 删除选中项
+      Serial.printf("[ADMIN] 删除RFID[%d]: %02X:%02X:%02X:%02X\n", adminSelIdx,
+        rfidList[adminSelIdx][0], rfidList[adminSelIdx][1],
+        rfidList[adminSelIdx][2], rfidList[adminSelIdx][3]);
+      for (int i = adminSelIdx; i < rfidCount - 1; i++)
+        rfidList[i] = rfidList[i + 1];
+      rfidCount--;
+      if (adminSelIdx >= rfidCount && adminSelIdx > 0) adminSelIdx--;
+      saveConfigToFlash();
+      syncConfigToServer();
+      beep(1, 100);
+      oledShowAdminDelList();
+    } else if (key == 'D') {
+      adminSubMode = 0;
+      oledShowAdminMenu();
+    }
+    return;
+  }
+
+  // 子模式4 = 添加指纹
+  if (adminSubMode == 4) {
+    if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); return; }
+    // 启动指纹录入
+    if (fpOnline && fpState == FP_IDLE) {
+      Serial.println("[ADMIN] 开始指纹录入...");
+      uint8_t p[6] = {0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00};
+      fpSend(0x31, p, 6);  // PS_AutoEnroll
+      fpState = FP_LISTENING;
+      fpListenStart = millis();
+    }
+    // 等待录入结果
+    if (fpState == FP_LISTENING) {
+      while (fpSerial.available()) {
+        uint8_t b = fpSerial.read();
+        if (fpBufLen == 0 && b != 0xEF) continue;
+        if (fpBufLen >= 63) { fpBufLen = 0; continue; }
+        fpBuf[fpBufLen++] = b;
+        if (fpBufLen >= 9) {
+          uint16_t L = (fpBuf[7] << 8) | fpBuf[8];
+          if (fpBufLen >= 9 + L) {
+            uint8_t step = fpStep();
+            uint8_t ack  = fpAck();
+            if (step == 0x05) {
+              fpState = FP_IDLE;
+              if (ack == 0x00) {
+                uint16_t id = (fpIdH() << 8) | fpIdL();
+                if (fpCount < MAX_FP) {
+                  fpList[fpCount++] = id;
+                  saveConfigToFlash();
+                  syncConfigToServer();
+                  Serial.printf("[ADMIN] 指纹录入成功 ID=%d (共%d枚)\n", id, fpCount);
+                  oledShowAdminResult(true, "");
+                  beep(1, 100);
+                } else {
+                  Serial.println("[ADMIN] 指纹列表已满");
+                  oledShowAdminResult(false, "指纹列表已满");
+                }
+              } else {
+                Serial.printf("[ADMIN] 指纹录入失败 ack=0x%02X\n", ack);
+                oledShowAdminResult(false, "录入失败 重试");
+              }
+              delay(1500);
+              oledShowAdminAddFp();
+            }
+            fpBufLen = 0;
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  // 子模式5 = 删除指纹列表
+  if (adminSubMode == 5) {
+    if (fpCount == 0) {
+      if (key == 'D') { adminSubMode = 0; oledShowAdminMenu(); }
+      return;
+    }
+    if (key == '2') {
+      if (adminSelIdx < fpCount - 1) adminSelIdx++;
+      oledShowAdminDelFpList();
+    } else if (key == '8') {
+      if (adminSelIdx > 0) adminSelIdx--;
+      oledShowAdminDelFpList();
+    } else if (key == '#' || key == 'C') {
+      uint16_t id = fpList[adminSelIdx];
+      // 发送删除指令 PS_DeleteChar (0x0C)
+      uint8_t p[5] = { (uint8_t)(id >> 8), (uint8_t)(id & 0xFF), 0x00, 0x01, 0x00 };
+      fpSend(0x0C, p, 5);
+      delay(200);
+      Serial.printf("[ADMIN] 删除指纹 ID=%d\n", id);
+      for (int i = adminSelIdx; i < fpCount - 1; i++)
+        fpList[i] = fpList[i + 1];
+      fpCount--;
+      if (adminSelIdx >= fpCount && adminSelIdx > 0) adminSelIdx--;
+      saveConfigToFlash();
+      syncConfigToServer();
+      beep(1, 100);
+      oledShowAdminDelFpList();
+    } else if (key == 'D') {
+      adminSubMode = 0;
+      oledShowAdminMenu();
+    }
+    return;
+  }
+
+  // 子模式6 = 修改密码
+  if (adminSubMode == 6) {
+    if (key >= '0' && key <= '9' && pwdIdx < PWD_LEN) {
+      pwdBuf[pwdIdx++] = key;
+      oledShowAdminChangePwd();
+      return;
+    }
+    if (key == '#' || key == 'C') {
+      if (pwdIdx == PWD_LEN) {
+        pwdBuf[PWD_LEN] = '\0';
+        strncpy(AUTH_PWD, pwdBuf, PWD_LEN + 1);
+        saveConfigToFlash();
+        syncConfigToServer();
+        Serial.printf("[ADMIN] 密码修改为: %s\n", AUTH_PWD);
+        oledShowAdminResult(true, "");
+        beep(1, 100);
+        delay(1500);
+        adminSubMode = 0;
+        oledShowAdminMenu();
+      }
+      return;
+    }
+    if (key == 'A') {
+      if (pwdIdx > 0) { pwdIdx--; pwdBuf[pwdIdx] = '\0'; oledShowAdminChangePwd(); }
+      return;
+    }
+    if (key == 'B') { resetPwdInput(); oledShowAdminChangePwd(); return; }
+    if (key == 'D') { adminSubMode = 0; resetPwdInput(); oledShowAdminMenu(); return; }
+    return;
   }
 }
 
@@ -1156,6 +1648,39 @@ void loadConfigFromFlash() {
     Serial.println("[FLASH] Flash无数据，使用默认配置");
   }
   prefs.end();
+}
+
+// ==================== 同步配置到服务器 ====================
+
+void syncConfigToServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClient client;
+  client.setTimeout(500);
+  if (!client.connect(SERVER_HOST, SERVER_PORT)) return;
+
+  // 构建JSON: 同步白名单和密码
+  String body = "{\"password\":\"" + String(AUTH_PWD) + "\",\"rfid_whitelist\":[";
+  for (int i = 0; i < rfidCount; i++) {
+    if (i > 0) body += ",";
+    char buf[16];
+    sprintf(buf, "\"%02X:%02X:%02X:%02X\"",
+      rfidList[i][0], rfidList[i][1], rfidList[i][2], rfidList[i][3]);
+    body += buf;
+  }
+  body += "],\"fp_whitelist\":[";
+  for (int i = 0; i < fpCount; i++) {
+    if (i > 0) body += ",";
+    body += String(fpList[i]);
+  }
+  body += "]}";
+
+  String req = "POST /api/config HTTP/1.1\r\nHost: " + String(SERVER_HOST) +
+               "\r\nContent-Type: application/json\r\nContent-Length: " + String(body.length()) +
+               "\r\nConnection: close\r\n\r\n" + body;
+  client.print(req);
+  delay(200);
+  client.stop();
+  Serial.println("[SYNC] 配置已同步到服务器");
 }
 
 // ==================== 离线日志缓存 ====================
