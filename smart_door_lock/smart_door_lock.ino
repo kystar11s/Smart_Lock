@@ -1172,7 +1172,8 @@ void handleAdminMenu(char key) {
         if (ack == 0x00) {
           // GET_IMAGE成功 → 发送GEN_CHAR
           Serial.printf("[ADMIN] step%d 图像采集成功 → 生成特征\n", fpEnrollStep);
-          fpSend(0x02, &fpEnrollStep, 1);  // GEN_CHAR(bufferId=step)
+          uint8_t bufId = fpEnrollStep;
+          fpSend(0x02, &bufId, 1);  // GEN_CHAR(bufferId=step)
           if (fpReadResponse(200) && fpAck() == 0x00) {
             Serial.printf("[ADMIN] step%d 特征生成成功\n", fpEnrollStep);
             fpEnrollStep++;
