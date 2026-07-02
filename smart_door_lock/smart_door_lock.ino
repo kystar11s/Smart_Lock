@@ -1086,7 +1086,8 @@ void handleAdminMenu(char key) {
         rfidList[adminSelIdx][0], rfidList[adminSelIdx][1],
         rfidList[adminSelIdx][2], rfidList[adminSelIdx][3]);
       for (int i = adminSelIdx; i < rfidCount - 1; i++)
-        rfidList[i] = rfidList[i + 1];
+        for (byte j = 0; j < UID_LEN; j++)
+          rfidList[i][j] = rfidList[i + 1][j];
       rfidCount--;
       if (adminSelIdx >= rfidCount && adminSelIdx > 0) adminSelIdx--;
       saveConfigToFlash();
